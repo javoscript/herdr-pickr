@@ -1,11 +1,16 @@
 local uv = require("luv")
 local script = assert(uv.fs_realpath(arg[0]), "Cannot resolve picker script path")
 local directory = assert(script:match("^(.*)/[^/]+$"))
-local lib = directory .. "/../../lib"
+local lib = directory .. "/lib"
 package.path = directory .. "/?.lua;" .. lib .. "/?.lua;" .. lib .. "/vendor/?.lua;" .. package.path
 
 if arg[1] == "preview" and arg[2] and not arg[3] then
   io.write(require("core").preview(arg[2]))
+  return
+end
+
+if arg[1] == "control" and arg[2] and arg[3] then
+  io.write(require("runtime").control_helper(arg[2], arg[3], arg[4]))
   return
 end
 

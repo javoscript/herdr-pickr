@@ -21,11 +21,254 @@ end
 -- Pipes carry only candidate data/results; fzf uses the popup's /dev/tty for UI.
 M.run = require("process").run
 
+-- The caller owns the event loop. Completion waits for exit and both output
+-- streams; cancellation closes inherited pipes too, so descendants cannot keep
+-- a closing picker alive. Never call the blocking runner from these callbacks.
+function M.spawn(command, args, input, env, timeout, callback)
+  local stdin, stdout, stderr = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
+  local output, errors, process, timer = {}, {}, nil, nil
+  local exited, streams, finished, failure, code, signal = false, 2, false, nil, nil, nil
+  local job = {}
+  local function complete()
+    if finished or not exited or streams ~= 0 then return end
+    finished = true
+    close(stdin); close(stdout); close(stderr); close(timer); close(process)
+    callback(failure, code, table.concat(output), table.concat(errors), signal)
+  end
+  function job:cancel(reason)
+    if finished then return end
+    failure = reason or "cancelled"
+    close(stdin); close(stdout); close(stderr); close(timer)
+    streams = 0
+    if process and not exited then process:kill("sigkill") end
+    complete()
+  end
+  local launch_error
+  process, launch_error = uv.spawn(command, {
+    args = args, env = env, stdio = { stdin, stdout, stderr },
+  }, function(exit_code, exit_signal)
+    code, signal, exited = exit_code, exit_signal, true
+    close(process); close(stdin)
+    complete()
+  end)
+  if not process then
+    exited, streams, failure = true, 0, "Cannot launch " .. command .. ": " .. tostring(launch_error)
+    -- Defer even launch failure so callers can retain the returned job first.
+    timer = uv.new_timer()
+    timer:start(0, 0, complete)
+    return job
+  end
+  local function collect(pipe, chunks)
+    pipe:read_start(function(err, data)
+      if finished or pipe:is_closing() then return end
+      if err then job:cancel(tostring(err)); return end
+      if data then chunks[#chunks + 1] = data
+      else streams = streams - 1; close(pipe); complete() end
+    end)
+  end
+  collect(stdout, output); collect(stderr, errors)
+  stdin:write(input or "", function(err)
+    if err and not tostring(err):match("EPIPE") then job:cancel(tostring(err)); return end
+    if not stdin:is_closing() then stdin:shutdown(function() close(stdin) end) end
+  end)
+  if timeout then
+    timer = uv.new_timer()
+    timer:start(timeout, 0, function() job:cancel(command .. " timed out") end)
+  end
+  return job
+end
+
+function M.snapshot_async(callback)
+  return M.spawn(os.getenv("HERDR_BIN_PATH") or "herdr", { "api", "snapshot" }, nil, nil, 10000,
+    function(err, code, output, errors)
+      if err or code ~= 0 then callback(err or (errors ~= "" and errors or "Herdr command failed")); return end
+      local ok, snapshot = pcall(function()
+        local decoded = json.decode(output)
+        if decoded.error then error(json.encode(decoded.error), 0) end
+        return assert(decoded.result and decoded.result.snapshot, "Herdr returned no snapshot")
+      end)
+      if ok then callback(nil, snapshot) else callback(snapshot) end
+    end)
+end
+
+-- A small JSON-line protocol connects short-lived fzf transform helpers to the
+-- picker owner. Helpers never fetch snapshots or own the interactive lifecycle.
+function M.control_helper(path, event, argument)
+  if event == "match" then
+    local file = assert(io.open(argument, "r"))
+    argument = file:read("*a")
+    file:close()
+  end
+  local peer, timer = uv.new_pipe(false), uv.new_timer()
+  local buffer, failure = "", nil
+  local function finish(err)
+    failure = err
+    close(peer); close(timer)
+  end
+  timer:start(2000, 0, function() finish("Picker control timed out") end)
+  peer:connect(path, function(err)
+    if err then finish(err); return end
+    peer:read_start(function(read_error, data)
+      if read_error then finish(read_error); return end
+      if not data then finish(); return end
+      buffer = buffer .. data
+    end)
+    peer:write(json.encode({ event = event, argument = argument }) .. "\n",
+      function(write_error) if write_error then finish(write_error) end end)
+  end)
+  uv.run()
+  if failure then error(failure, 0) end
+  return buffer
+end
+
+function M.run_picker(command, args, input, env, session, render, footer)
+  local root = assert(uv.fs_mkdtemp("/tmp/pickr-XXXXXX"))
+  local socket, data_path, fzf_socket = root .. "/owner.sock", root .. "/rows", root .. "/fzf.sock"
+  local server, peers = uv.new_pipe(false), {}
+  local fetch, fzf, terminal_error, answer, pending, loaded
+  local helper = shell_quote(assert(uv.exepath())) .. " " .. shell_quote(directory .. "/main.lua")
+    .. " control " .. shell_quote(socket)
+  local function write_rows(rows, header)
+    local file = assert(io.open(data_path, "w"))
+    local ok, err = file:write(header .. "\n" .. table.concat(rows, "\n"))
+    local closed, close_error = file:close()
+    assert(ok, err); assert(closed, close_error)
+  end
+  local reload = "reload(cat " .. shell_quote(data_path) .. ")"
+  local function shutdown()
+    session:close()
+    if fetch then fetch:cancel(); fetch = nil end
+    close(server)
+    for peer in pairs(peers) do close(peer) end
+  end
+  local function fatal(err)
+    terminal_error = tostring(err)
+    shutdown()
+    if fzf then fzf:cancel() end
+  end
+  local function post(actions)
+    local peer, timer = uv.new_pipe(false), uv.new_timer()
+    peers[peer], peers[timer] = true, true
+    local response, done = "", false
+    local function finish(err)
+      if done then return end
+      done = true
+      close(peer); close(timer)
+      peers[peer], peers[timer] = nil, nil
+      if err and session.state ~= "closed" then fatal(err) end
+    end
+    timer:start(2000, 0, function() finish("fzf control timed out") end)
+    peer:connect(fzf_socket, function(err)
+      if session.state == "closed" then return end
+      if err then finish(err); return end
+      peer:read_start(function(read_error, data)
+        if read_error then finish(read_error); return end
+        if data then response = response .. data end
+        if response:find("\r\n", 1, true) then
+          finish(not response:match("^HTTP/1%.[01] 200 ") and "fzf rejected refresh actions" or nil)
+        elseif not data then finish("fzf control closed before replying") end
+      end)
+      peer:write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: " .. #actions
+        .. "\r\n\r\n" .. actions, function(write_error) if write_error then finish(write_error) end end)
+    end)
+  end
+  local function failed(generation)
+    if session:fail(generation) then
+      pending, loaded = nil, false
+      post("change-header(Refresh failed — Ctrl+L to retry)+rebind(ctrl-l)")
+    end
+  end
+  local function start_fetch()
+    local generation = session.generation
+    fetch = M.snapshot_async(function(err, snapshot)
+      fetch = nil
+      if not session:is_current(generation) then return end
+      if err then failed(generation); return end
+      local ok, rows, header = pcall(render, snapshot)
+      if not ok then failed(generation); return end
+      local written = pcall(write_rows, rows, header)
+      if not written then failed(generation); return end
+      pending, loaded = { generation = generation, rows = rows, header = header }, false
+      post(reload)
+    end)
+  end
+  local clearing = false
+  local function event(request)
+    if session.state == "closed" then return "" end
+    if request.event == "refresh" then
+      if not session:begin_refresh(request.argument) then return "" end
+      pending, loaded, clearing = nil, false, true
+      write_rows({}, session.header)
+      return "unbind(enter)+unbind(ctrl-l)+change-header(Refreshing…)+" .. reload
+    elseif request.event == "load" then
+      if clearing then
+        clearing = false
+        start_fetch()
+      elseif pending then loaded = true end
+    elseif request.event == "match" and pending and loaded then
+      -- result-final's synchronous helper sees this exact matching result set;
+      -- no position is computed from an earlier query or asynchronous GET.
+      local position, index = 1, 0
+      for id in request.argument:gmatch("[^\n]+") do
+        index = index + 1
+        if id == session.saved_id then position = index; break end
+      end
+      loaded = false
+      -- A second synchronous acknowledgement publishes the acceptance map only
+      -- after fzf has applied the position and refreshed the preview target.
+      return "pos(" .. position .. ")+refresh-preview+transform(" .. helper .. " ready)"
+    elseif request.event == "ready" and pending then
+      session:publish(pending.generation, pending.rows, pending.header)
+      pending, loaded = nil, false
+      return "change-header()+change-footer(" .. footer(#session.rows)
+        .. ")+rebind(enter)+rebind(ctrl-l)"
+    end
+    return ""
+  end
+  local ok, err = pcall(function()
+    assert(server:bind(socket))
+    assert(server:listen(16, function(listen_error)
+      if listen_error then fatal(listen_error); return end
+      local peer, buffer = uv.new_pipe(false), ""
+      peers[peer] = true
+      assert(server:accept(peer))
+      peer:read_start(function(read_error, data)
+        if session.state == "closed" then return end
+        if read_error or not data then close(peer); peers[peer] = nil; return end
+        buffer = buffer .. data
+        if not buffer:find("\n", 1, true) then return end
+        peer:read_stop()
+        local handled, actions = pcall(function() return event(json.decode(buffer)) end)
+        if not handled then fatal(actions); return end
+        peer:write(actions, function()
+          peer:shutdown(function() close(peer); peers[peer] = nil end)
+        end)
+      end)
+    end))
+    args[#args + 1] = "--listen=" .. fzf_socket
+    args[#args + 1] = "--bind=ctrl-l:transform(" .. helper .. " refresh {1}),load:transform("
+      .. helper .. " load),result-final:transform(" .. helper .. " match {*f1})"
+    fzf = M.spawn(command, args, input, env, nil, function(failure, code, output, errors, signal)
+      local selected = output:match("^\n(.*)$")
+      answer = { code, output, errors, signal, selected and session:accept(selected:gsub("\n+$", "")) }
+      if failure and not terminal_error then terminal_error = failure end
+      shutdown()
+    end)
+    uv.run()
+  end)
+  if not ok then shutdown(); if fzf then fzf:cancel() end; uv.run() end
+  uv.fs_unlink(socket); uv.fs_unlink(data_path); uv.fs_unlink(fzf_socket); uv.fs_rmdir(root)
+  if not ok then error(err, 0) end
+  if terminal_error then error(terminal_error, 0) end
+  assert(answer)
+  return table.unpack(answer, 1, 5)
+end
+
 function M.current_workspace(getenv)
   getenv = getenv or os.getenv
   local origin = getenv("PICKR_ORIGIN_WORKSPACE_ID")
   if origin and origin ~= "" then return origin end
-  if getenv("HERDR_PLUGIN_ID") == "local.pickr" then
+  if getenv("HERDR_PLUGIN_ID") == "javoscript.herdr-pickr" then
     local context = getenv("HERDR_PLUGIN_CONTEXT_JSON")
     if context and context ~= "" then
       local workspace = json.decode(context).workspace_id
@@ -97,7 +340,7 @@ end
 function M.fzf_env()
   local env = {}
   for key, value in pairs(uv.os_environ()) do
-    if key ~= "FZF_DEFAULT_OPTS" and key ~= "FZF_DEFAULT_OPTS_FILE" then
+    if key ~= "FZF_DEFAULT_OPTS" and key ~= "FZF_DEFAULT_OPTS_FILE" and key ~= "FZF_API_KEY" then
       env[#env + 1] = key .. "=" .. value
     end
   end

@@ -23,10 +23,6 @@ local function indicator(item)
 	return "\27[38;2;" .. style.color .. "m" .. style.icon .. "\27[0m"
 end
 
-local function plain(text)
-	return (text:gsub("\27%[[%d;]*m", ""))
-end
-
 local function value(text, fallback)
 	if text == nil or text == false or text == "" then
 		return fallback or ""
@@ -145,7 +141,8 @@ local function column_header(kind, scope)
 		header[#header + 1] = "tab"
 		header[#header + 1] = "agent"
 		header[#header + 1] = "title"
-		header[#header + 1] = "pane"
+		header[#header + 1] = "pane [label]"
+		header.muted_suffixes = { [#header] = "[label]" }
 	end
 	return header
 end
@@ -186,7 +183,10 @@ end
 function M.candidates(kind, scope)
 	-- One consistent snapshot includes server-aggregated statuses and remembered
 	-- tab focus, including inactive tabs (PaneInfo.focused is only global focus).
-	local snapshot = runtime.herdr("api", "snapshot").snapshot
+	return M.snapshot_candidates(runtime.herdr("api", "snapshot").snapshot, kind, scope, runtime.current_workspace())
+end
+
+function M.snapshot_candidates(snapshot, kind, scope, current)
 	local workspaces = grouped_workspaces(snapshot.workspaces)
 	local directories, targets = tab_directories(snapshot)
 	local names, entries, parent_suffixes = {}, {}, {}
@@ -224,7 +224,6 @@ function M.candidates(kind, scope)
 		entry.parent_field = #entry
 		entry.muted_suffixes = { [#entry] = parent_suffixes[workspace_id] }
 	end
-	local current = runtime.current_workspace()
 	if scope == "current" and not current then
 		error("Current-space pickers must be launched from a Herdr popup", 0)
 	end
@@ -357,8 +356,70 @@ local picker_shortcuts = {
 	["ctrl-g"] = { "agents", "all" },
 }
 
+local Session = {}
+Session.__index = Session
+
+local function candidate_id(row)
+	if type(row) ~= "string" or row:find("[\r\n]") then return nil end
+	local id = row:match("^([^%s]+)\t[^\t]+\t[^\t]*$")
+	if id and id:sub(1, 1) ~= "@" then return id end
+end
+
+function M.new_session(rows, header)
+	local session = setmetatable({ state = "loading", generation = 0, active = {} }, Session)
+	assert(session:publish(0, rows, header))
+	return session
+end
+
+function Session:begin_refresh(id)
+	if self.state ~= "ready" and self.state ~= "error" then return nil end
+	if self.state == "ready" then self.saved_id = self.active[id] and id or nil end
+	self.generation = self.generation + 1
+	self.state, self.active = "loading", {}
+	return self.generation
+end
+
+function Session:is_current(generation)
+	return self.state == "loading" and self.generation == generation
+end
+
+function Session:publish(generation, rows, header)
+	if not self:is_current(generation) then return false end
+	local active = {}
+	for _, row in ipairs(rows) do
+		local id = assert(candidate_id(row), "Malformed candidate")
+		assert(not active[id], "Duplicate candidate ID")
+		active[id] = true
+	end
+	self.rows, self.header, self.active, self.state = rows, header, active, "ready"
+	return true
+end
+
+function Session:fail(generation)
+	if not self:is_current(generation) then return false end
+	self.state, self.active = "error", {}
+	return true
+end
+
+function Session:accept(row)
+	local id = candidate_id(row)
+	if self.state == "ready" and self.active[id] then return id end
+end
+
+function Session:close()
+	self.generation = self.generation + 1
+	self.state, self.active = "closed", {}
+end
+
 local function pick_once(kind, scope)
 	local rows, header = M.candidates(kind, scope)
+	local origin = runtime.current_workspace()
+	local session = M.new_session(rows, header)
+	local function footer(count)
+		return (count > 0 and "enter: switch" or "no entries")
+			.. " · ctrl+l: refresh · ctrl+p: preview · esc: close"
+			.. "\nctrl+r: tabs here · ctrl+t: all tabs · ctrl+s: spaces · ctrl+a: agents here · ctrl+g: all agents"
+	end
 	local search_fields = {}
 	for i = 2, #column_header(kind, scope) do
 		search_fields[#search_fields + 1] = tostring(i - 1)
@@ -387,16 +448,19 @@ local function pick_once(kind, scope)
 		"--color=prompt:#c4a7e7,spinner:#f6c177,pointer:#eb6f92",
 		"--color=header:#6e6a86,footer:#6e6a86,border:#403d52,label:#e0def4",
 		"--border-label=" .. title,
-		"--footer="
-			.. (#rows > 0 and "enter: switch · ctrl+p: preview · esc: cancel" or "no entries · ctrl+p: preview · esc: close")
-			.. "\nctrl+r: tabs here · ctrl+t: all tabs · ctrl+s: spaces · ctrl+a: agents here · ctrl+g: all agents",
+		"--footer=" .. footer(#rows),
 		"--bind=esc:abort,ctrl-c:abort,enter:accept,ctrl-p:toggle-preview",
 	}
 	if kind ~= "tabs" or scope == "all" then
 		args[#args + 1] = "--no-sort"
 	end
-	local code, output, errors, signal =
-		runtime.run("fzf", args, header .. "\n" .. table.concat(rows, "\n"), runtime.fzf_env())
+	local code, output, errors, signal, target =
+		runtime.run_picker("fzf", args, header .. "\n" .. table.concat(rows, "\n"), runtime.fzf_env(), session,
+			function(snapshot)
+				local fresh, heading = M.snapshot_candidates(snapshot, kind, scope, origin)
+				M.new_session(fresh, heading) -- Validate the whole generation before publishing any rows.
+				return fresh, heading
+			end, footer)
 	-- --expect emits the pressed shortcut on the first line (blank for Enter).
 	-- A shortcut can exit with code 1 when there are no matching rows.
 	local key, selected = output:match("^([^\n]*)\n(.*)$")
@@ -412,18 +476,13 @@ local function pick_once(kind, scope)
 	if key ~= "" or selected == nil then
 		error("Picker returned an unknown shortcut", 0)
 	end
-	selected = selected:gsub("\n+$", "")
-	for _, row in ipairs(rows) do
-		-- fzf --ansi removes styling from accepted output.
-		if plain(row) == selected then
-			local target = assert(selected:match("^(.-)\t"))
-			if kind == "agents" then
-				runtime.focus_agent_pane(target)
-			else
-				runtime.herdr(kind == "tabs" and "tab" or "workspace", "focus", target)
-			end
-			return
+	if target then
+		if kind == "agents" then
+			runtime.focus_agent_pane(target)
+		else
+			runtime.herdr(kind == "tabs" and "tab" or "workspace", "focus", target)
 		end
+		return
 	end
 	error("Picker returned an unknown selection", 0)
 end

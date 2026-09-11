@@ -1,13 +1,23 @@
 local uv = require("luv")
 local directory = assert(uv.fs_realpath(arg[0])):match("^(.*)/[^/]+$")
-local lib = directory .. "/../../lib"
+local lib = directory .. "/lib"
 package.path = directory .. "/?.lua;" .. lib .. "/?.lua;" .. lib .. "/vendor/?.lua;" .. package.path
 local core, runtime, json = require("core"), require("runtime"), require("json")
+local original_run_picker = runtime.run_picker
+-- Existing flag/filter fixtures isolate the UI process. Interactive refresh
+-- checks exercise the real asynchronous controller separately.
+runtime.run_picker = function(command, args, input, env, session)
+  local code, output, errors, signal = runtime.run(command, args, input, env)
+  local selected = output:match("^\n(.*)$")
+  local target = selected and session:accept(selected:gsub("\n+$", ""))
+  session:close()
+  return code, output, errors, signal, target
+end
 
 -- Action context wins over inherited caller state; the captured origin wins
 -- over the fresh context Herdr supplies when the popup eventually opens.
 local context_env = {
-  HERDR_PLUGIN_ID = "local.pickr",
+  HERDR_PLUGIN_ID = "javoscript.herdr-pickr",
   HERDR_PLUGIN_CONTEXT_JSON = '{"workspace_id":"action-space"}',
   HERDR_ACTIVE_WORKSPACE_ID = "inherited-space",
 }
@@ -28,7 +38,7 @@ do
     local called = false
     runtime.herdr = function(...)
       local args = { ... }
-      assert(table.concat(args, "|") == "plugin|pane|open|--plugin|local.pickr|--entrypoint|"
+      assert(table.concat(args, "|") == "plugin|pane|open|--plugin|javoscript.herdr-pickr|--entrypoint|"
         .. entry .. "|--env|PICKR_ORIGIN_WORKSPACE_ID=original-space")
       called = true
       return {}
@@ -91,6 +101,10 @@ runtime.focus_agent_pane = function(id) focus_calls[#focus_calls + 1] = { "pane"
 for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
     { "workspaces", "all" }, { "agents", "current" }, { "agents", "all" } }) do
   local rows, header = core.candidates(table.unpack(mode))
+  local rebuilt, rebuilt_header = core.snapshot_candidates(runtime.herdr("api", "snapshot").snapshot,
+    mode[1], mode[2], "w1")
+  equal(rebuilt, rows)
+  equal(rebuilt_header, header)
   local positions
   local with_header = { header }
   for _, row in ipairs(rows) do with_header[#with_header + 1] = row end
@@ -104,13 +118,13 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
     end
     if positions then equal(columns, positions) else positions = columns end
   end
-  local labels = header:match("^[^\t]+\t[^\t]+\t(.*)$"):gsub("%s+", " "):gsub("^ ", "")
+  local labels = plain(header):match("^[^\t]+\t[^\t]+\t(.*)$"):gsub("%s+", " "):gsub("^ ", "")
   local expected_headers = {
     ["workspaces:all"] = "status · space · tabs · directory",
     ["tabs:current"] = "status · tab · panes · directory",
     ["tabs:all"] = "status · space · tab · panes · directory",
-    ["agents:current"] = "status · tab · agent · title · pane",
-    ["agents:all"] = "status · space · tab · agent · title · pane",
+    ["agents:current"] = "status · tab · agent · title · pane [label]",
+    ["agents:all"] = "status · space · tab · agent · title · pane [label]",
   }
   equal(labels, expected_headers[mode[1] .. ":" .. mode[2]])
   local header_code, header_output = original_run("fzf", { "--ansi", "--header-lines=1",
@@ -543,6 +557,89 @@ if original_current then uv.os_setenv("HERDR_ACTIVE_WORKSPACE_ID", original_curr
 else uv.os_unsetenv("HERDR_ACTIVE_WORKSPACE_ID") end
 print("All five variants: alignment, scoping, missing metadata, selection and cancellation OK")
 
+do
+  local rows = { "one\tpreview\told label", "two\tpreview\tsecond" }
+  local session = core.new_session(rows, "@header\t-\theader")
+  equal(session.state, "ready")
+  equal(session:accept(rows[1]), "one")
+  local generation = session:begin_refresh("one")
+  equal(session.state, "loading")
+  assert(not session:accept(rows[1]))
+  assert(not session:begin_refresh("two"))
+  equal(session.saved_id, "one")
+  assert(session:fail(generation))
+  equal(session.state, "error")
+  assert(not session:accept(rows[1]))
+  local retry = session:begin_refresh(nil)
+  equal(session.saved_id, "one")
+  assert(not session:publish(generation, rows, "old header"))
+  assert(session:publish(retry, { "two\tnew-preview\tsecond", "one\tnew-preview\tnew label" }, "new header"))
+  equal(session:accept("one\tnew-preview\tnew label"), "one")
+  for _, invalid in ipairs({ "@header\t-\theader", "unknown\t-\tlabel", "one", "one\tx\ty\nz", "one\tx\ty\tz" }) do
+    assert(not session:accept(invalid))
+  end
+  local pending = session:begin_refresh("one")
+  session:close()
+  equal(session.state, "closed")
+  assert(not session:publish(pending, rows, "late header"))
+  assert(not session:fail(pending))
+  assert(not session:begin_refresh("one"))
+  assert(not session:accept(rows[1]))
+end
+print("Refresh session: transitions, retry identity, generation guards and acceptance OK")
+
+do
+  local saved_picker, saved_candidates = runtime.run_picker, core.candidates
+  local saved_current, saved_snapshot = runtime.current_workspace, core.snapshot_candidates
+  local origin = "original-space"
+  runtime.current_workspace = function() return origin end
+  core.candidates = function() return { "one\tpreview\told label" }, "@header\t-\theader" end
+  core.snapshot_candidates = function(snapshot, kind, scope, current)
+    equal(current, "original-space")
+    equal(snapshot, { fresh = true })
+    assert(scope == "current" and (kind == "tabs" or kind == "agents"))
+    return { "one\tnew-preview\tnew label" }, "@header\t-\tnew header"
+  end
+  runtime.run_picker = function(_, _, _, _, session, render)
+    origin = "changed-space"
+    local generation = session:begin_refresh("one")
+    local rows, header = render({ fresh = true })
+    assert(session:publish(generation, rows, header))
+    equal(session:accept(rows[1]), "one")
+    session:close()
+    return 130, "", "", 0
+  end
+  for _, kind in ipairs({ "tabs", "agents" }) do
+    origin = "original-space"
+    core.pick(kind, "current")
+  end
+  runtime.run_picker, core.candidates = saved_picker, saved_candidates
+  runtime.current_workspace, core.snapshot_candidates = saved_current, saved_snapshot
+end
+print("Refresh scope: captured original workspace survives ambient context changes OK")
+
+for _, scenario in ipairs({ "success", "timeout", "cancel", "launch" }) do
+  local calls, failure, output = 0, nil, nil
+  local started = uv.hrtime()
+  local job = runtime.spawn(scenario == "launch" and "pickr-nonexistent" or assert(uv.exepath()),
+    { "-e", "require('luv').sleep(" .. (scenario == "success" and "20" or "1000") .. "); io.write('complete')" },
+    nil, nil, scenario == "timeout" and 10 or 2000,
+    function(err, code, data)
+      calls, failure, output = calls + 1, err, data
+      if scenario == "success" then assert(code == 0) end
+    end)
+  if scenario == "cancel" then job:cancel() end
+  uv.run()
+  equal(calls, 1)
+  if scenario == "success" then assert(not failure); equal(output, "complete")
+  else assert(failure); assert((uv.hrtime() - started) / 1e6 < 900) end
+  job:cancel()
+  uv.run()
+  equal(calls, 1)
+  assert(not uv.loop_alive(), "Asynchronous subprocess leaked resources")
+end
+print("Async subprocesses: delayed success, timeout, cancellation, launch failure and cleanup OK")
+
 local code, output, errors = runtime.run("fzf", { "--filter=alpha", "--delimiter=\t", "--with-nth=2.." },
   "id1\talpha\nid2\tbeta", runtime.fzf_env(), 5000)
 assert(code == 0, errors)
@@ -559,7 +656,9 @@ equal(preview_output, "No pane available for preview.\n")
 print("Preview subprocess: quoted absolute interpreter/script command and entry point OK")
 
 -- Local fake server exercises actual luv socket framing, including split replies.
-local path = directory .. "/.test-" .. uv.os_getpid() .. ".sock"
+-- Unix socket paths have a small platform limit, independent of checkout length.
+local socket_directory = assert(uv.fs_mkdtemp("/tmp/pickr-test-XXXXXX"))
+local path = socket_directory .. "/focus.sock"
 local original_socket = os.getenv("HERDR_SOCKET_PATH")
 uv.os_setenv("HERDR_SOCKET_PATH", path)
 for _, scenario in ipairs({ "success", "error", "wrong-pane", "eof" }) do
@@ -588,9 +687,12 @@ for _, scenario in ipairs({ "success", "error", "wrong-pane", "eof" }) do
     end)
   end)
   local ok = pcall(runtime.focus_agent_pane, "opaque-id")
+  -- Closing the server may already have removed the socket path.
   uv.fs_unlink(path)
   assert(ok == (scenario == "success"), scenario)
 end
+assert(uv.fs_rmdir(socket_directory))
 if original_socket then uv.os_setenv("HERDR_SOCKET_PATH", original_socket)
 else uv.os_unsetenv("HERDR_SOCKET_PATH") end
 print("pane.focus socket: split responses, server errors, wrong pane and EOF OK")
+runtime.run_picker = original_run_picker

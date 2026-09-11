@@ -1,9 +1,9 @@
-id = "local.pickr"
-name = "Pickr"
+id = "javoscript.herdr-pickr"
+name = "Herdr Pickr"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
 description = "Fuzzy tab, space, and agent pickers with terminal previews."
-platforms = ["macos", "linux"]
+platforms = ["macos"]
 
 [[actions]]
 id = "tabs-current"
