@@ -274,6 +274,56 @@ receive the same settings. Preview/control helpers do not load the file. Missing
 files use defaults; unreadable or invalid files block launch with a file/setting
 diagnostic. Pickr never creates or edits this file. Close and reopen to adopt edits.
 
+### Search prompt
+
+All five variants default to exactly `"Search: "`, including the trailing space.
+Set a global prompt in the optional plugin `config.json`:
+
+```json
+{ "prompt": { "default": "Find: " } }
+```
+
+Combine a global default with per-variant overrides:
+
+```json
+{
+  "prompt": {
+    "default": "Find: ",
+    "variants": {
+      "tabs_current": "Tabs: ",
+      "tabs_all": null,
+      "spaces": "Spaces: ",
+      "agents_current": "",
+      "agents_all": "Agents: "
+    }
+  }
+}
+```
+
+The five supported names are `tabs_current`, `tabs_all`, `spaces`,
+`agents_current`, and `agents_all`. A non-null variant override takes precedence
+over the global value. Omitted or null `prompt`/`prompt.default` uses `"Search: "`;
+omitted or null `prompt.variants` or individual variants inherit the resolved
+global prompt. There are no built-in variant overrides. An empty string is an
+intentional blank prompt, even when the global value is nonempty.
+
+Text preserves all spaces, Unicode, quotes, and metacharacters exactly: no trimming,
+added separator, shell evaluation, or fzf action evaluation. NUL, carriage return,
+and newline are rejected. Wrong object/string types and unknown fields or variant
+names block launch with a file/field diagnostic, including invalid settings for
+inactive variants. Prompt color still follows the theme's `prompt` role.
+
+Switching selects the destination's prompt from the same launch settings and
+resets the query. Refresh loading, success, failure, and retry retain the active
+prompt and preserve the query. Close and reopen to adopt configuration edits,
+including edits made between popup launch and picker startup.
+
+To restore the previous appearance globally:
+
+```json
+{ "prompt": { "default": "◉/> " } }
+```
+
 ### Popup action keys
 
 The optional `keys` object maps actions to arrays of fzf key names:
@@ -478,7 +528,7 @@ Lua changes apply on the next launch. Herdr configuration reload is needed only
 when changing external Herdr launch bindings.
 The refresh control socket belongs to a unique private picker-session directory.
 
-All pickers use the `◉/>` prompt. Agent pickers match Herdr 0.9.0's priority
+Agent pickers match Herdr 0.9.0's priority
 order: blocked, done (unseen completion), working, idle, unknown. Within each
 status, the latest `state_change_seq` comes first; exact ties keep the API's
 workspace/tab/pane layout order. Missing sequences default to zero and missing
@@ -692,6 +742,22 @@ The automated equivalent creates and removes its own temporary distribution copy
 lua tests/relocation.lua
 ```
 
+### Search prompt live acceptance
+
+With fzf 0.74.3+ inside Herdr:
+
+1. Reopen without a prompt override and check `"Search: "` in all five variants.
+2. Reopen with mixed global/variant overrides and null inheritance. Switch between
+   variants, including empty lists and zero matches; confirm each destination's
+   prompt and query reset.
+3. Check exact trailing spaces and an empty variant prompt using the example above.
+4. Refresh through loading, success, failure, and retry. Confirm the active prompt
+   remains unchanged and the query is preserved.
+5. Edit the global prompt and a variant while open. Confirm switching and refreshing
+   retain the original settings, then close/reopen and confirm both edits apply.
+
+Record environment and actual outcomes under Compatibility verification.
+
 ### Two-row footer live acceptance
 
 With fzf 0.74.3+ inside Herdr, reopen the picker after code or configuration edits:
@@ -715,6 +781,17 @@ automated Lua checks alone do not establish live visual acceptance.
 ## Compatibility verification
 
 Supported minimums are listed under [Dependencies](#dependencies).
+
+### Configurable search prompt checks (2026-09-11)
+
+Environment: macOS 26.6.2 (25G83); Herdr 0.9.0; Lua 5.5.1;
+fzf 0.74.3 (Homebrew).
+
+| Check | Result |
+| --- | --- |
+| `lua tests/test.lua` | Passed: prompt defaults/inheritance, exact empty/literal argv, all five variants and 25 switching routes (including empty/zero-match fixtures), validation diagnostics, frozen snapshots/reopening, refresh failure/retry settings, existing configuration/preview/socket/subprocess regressions, real-fzf PTY checks, and README JSON examples. |
+| `git diff --check` | Passed. |
+| Live search prompt acceptance | User-confirmed pass on 2026-09-11 for the [search prompt checklist](#search-prompt-live-acceptance): defaults in all five variants, mixed overrides/inheritance, trailing spaces and empty prompts, switching with query reset, refresh/failure/retry with prompt and query preservation, and reopening to adopt edits. |
 
 ### Two-row footer checks (2026-09-11)
 

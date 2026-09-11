@@ -426,6 +426,13 @@ local function pick_once(kind, scope, settings, popup)
 	end
 	local title = kind == "workspaces" and "Spaces"
 		or (kind:gsub("^%l", string.upper) .. " — " .. scope .. " space" .. (scope == "all" and "s" or ""))
+	local prompt
+	for variant, destination in pairs(keymap.variants) do
+		if destination[1] == kind and destination[2] == scope then
+			prompt = settings.prompt.variants[variant]
+			break
+		end
+	end
 	local args = {
 		"--layout=reverse",
 		"--border=rounded",
@@ -436,7 +443,7 @@ local function pick_once(kind, scope, settings, popup)
 		-- --nth indexes the displayed fields after --with-nth. Individual
 		-- indices keep each query term within one column; a range joins them.
 		"--nth=" .. table.concat(search_fields, ","),
-		"--prompt=◉/> ",
+		"--prompt=" .. prompt,
 		"--header-lines=1",
 		"--with-shell=/bin/sh -c",
 		"--preview=" .. runtime.preview_command(),

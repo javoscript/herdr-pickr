@@ -40,9 +40,15 @@ local function object(value, field, allowed)
   end
 end
 
+local function prompt_string(value, field)
+  if type(value) ~= "string" then error(field .. ": expected a string", 0) end
+  if value:find("[%z\r\n]") then error(field .. ": must not contain NUL, CR, or LF", 0) end
+  return value
+end
+
 function M.decode(text)
   local config = json.decode(text, true)
-  object(config, "config", { keys = true, theme = true, preview = true, popup = true })
+  object(config, "config", { keys = true, theme = true, preview = true, popup = true, prompt = true })
   local keys, name, custom = {}, nil, {}
   local keymap, themes = require("pickr.keymap"), require("pickr.themes")
   if not omitted(config.keys) then
@@ -94,8 +100,24 @@ function M.decode(text)
       end
     end
   end
+  local prompt = { default = "Search: ", variants = {} }
+  local overrides = {}
+  if not omitted(config.prompt) then
+    object(config.prompt, "prompt", { default = true, variants = true })
+    if not omitted(config.prompt.default) then
+      prompt.default = prompt_string(config.prompt.default, "prompt.default")
+    end
+    if not omitted(config.prompt.variants) then
+      object(config.prompt.variants, "prompt.variants", keymap.variants)
+      overrides = config.prompt.variants
+    end
+  end
+  for variant in pairs(keymap.variants) do
+    prompt.variants[variant] = omitted(overrides[variant]) and prompt.default
+      or prompt_string(overrides[variant], "prompt.variants." .. variant)
+  end
   return { keymap = keymap.resolve(keys), roles = themes.resolve(name, custom),
-    theme_name = name or "catppuccin", preview = preview, popup = popup }
+    theme_name = name or "catppuccin", preview = preview, popup = popup, prompt = prompt }
 end
 
 local function read_file(path)
@@ -143,7 +165,12 @@ function M.owner(deps)
     assert(type(settings) == "table" and type(settings.keymap) == "table"
       and type(settings.keymap.keys) == "table" and type(settings.keymap.reverse) == "table"
       and type(settings.roles) == "table" and type(settings.preview) == "table"
-      and type(settings.popup) == "table", "invalid settings snapshot")
+      and type(settings.popup) == "table" and type(settings.prompt) == "table"
+      and type(settings.prompt.variants) == "table", "invalid settings snapshot")
+    prompt_string(settings.prompt.default, "prompt.default")
+    for variant in pairs(require("pickr.keymap").variants) do
+      prompt_string(settings.prompt.variants[variant], "prompt.variants." .. variant)
+    end
     return settings
   end)
   if not ok then error("PICKR_SETTINGS_SNAPSHOT: " .. tostring(result), 0) end

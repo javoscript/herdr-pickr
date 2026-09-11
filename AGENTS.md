@@ -14,8 +14,8 @@ See `README.md` for usage, project structure, and regression-check instructions.
 ## Documentation Guidelines
 
 - After making changes to the codebase, review and update `README.md` as needed
-  to keep usage, behavior, dependencies, project structure, and regression-check
-  instructions accurate.
+  to keep installation, configuration, feature highlights and usage instructions
+  accurate.
 
 ## Commit Guidelines
 

@@ -193,7 +193,7 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
       assert(command == "fzf" and input == header .. "\n" .. table.concat(rows, "\n"))
       local flags = {}
       for _, flag in ipairs(args) do flags[flag] = true end
-      assert(flags["--prompt=◉/> "])
+      assert(flags["--prompt=Search: "])
       assert((flags["--no-sort"] == true) == (mode[1] ~= "tabs" or mode[2] == "all"))
       assert(flags["--ansi"])
       assert(flags["--header-lines=1"])
@@ -536,15 +536,49 @@ local variants = {
   { "ctrl-s", "workspaces", "all" }, { "ctrl-a", "agents", "current" },
   { "ctrl-g", "agents", "all" },
 }
+local prompt_overrides = { tabs_current = "Tabs: ", tabs_all = "All tabs: ", spaces = "",
+  agents_current = "Agents: ", agents_all = "  ◉ ' $(touch nope); +change-prompt(x) " }
+local function variant_name(variant)
+  return variant[2] == "workspaces" and "spaces" or variant[2] .. "_" .. variant[3]
+end
+local function assert_prompt(args, expected)
+  local count = 0
+  for _, option in ipairs(args) do
+    assert(not option:match("^%-%-query")) -- Switching starts a fresh query.
+    if option:match("^%-%-prompt=") then
+      equal(option, "--prompt=" .. expected)
+      count = count + 1
+    end
+  end
+  equal(count, 1)
+end
+do
+  local saved_picker = runtime.run_picker
+  for _, text in ipairs({ '{}', '{"prompt":{"default":"Find: "}}',
+    '{"prompt":{"default":""}}', json.encode({ prompt = { default = prompt_overrides.agents_all } }),
+    json.encode({ prompt = { variants = prompt_overrides } }) }) do
+    local settings = config.decode(text)
+    for _, variant in ipairs(variants) do
+      runtime.run_picker = function(_, args, _, _, session)
+        assert(session.settings == settings)
+        assert_prompt(args, settings.prompt.variants[variant_name(variant)])
+        return 130, "", "", 0
+      end
+      core.pick(variant[2], variant[3], settings)
+    end
+  end
+  runtime.run_picker = saved_picker
+end
 for _, source in ipairs(variants) do
   for _, destination in ipairs(variants) do
     local runs = 0
     local saved_owner, resolved = config.owner, 0
-    local launch_settings = config.decode("{}")
+    local launch_settings = config.decode(json.encode({ prompt = { variants = prompt_overrides } }))
     config.owner = function() resolved = resolved + 1; return launch_settings end
     local saved_picker = runtime.run_picker
     runtime.run_picker = function(command, args, input, env, session, render, footer)
       assert(session.settings == launch_settings)
+      assert_prompt(args, prompt_overrides[variant_name(runs == 0 and source or destination)])
       return saved_picker(command, args, input, env, session, render, footer)
     end
     local target_rows, target_header = core.candidates(destination[2], destination[3], launch_settings)
@@ -594,6 +628,7 @@ do
   local settings = config.decode('{"keys":{"accept":["f1","alt-v"],"close":["f2"],'
     .. '"refresh":["f3","f4"],"toggle_preview":["f5"],"tabs_current":["f6"],'
     .. '"tabs_all":["f7"],"spaces":["f8"],"agents_current":["f9"],"agents_all":["f10"]}}')
+  settings.prompt = config.decode(json.encode({ prompt = { variants = prompt_overrides } })).prompt
   for _, empty in ipairs({ false, true }) do
     for _, source_variant in ipairs(variants) do
       for _, action in ipairs({ "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all" }) do
@@ -604,6 +639,8 @@ do
           return empty and {} or { "id\tpreview\tlabel" }, "@header\t-\theader"
         end
         runtime.run_picker = function(_, args, _, _, session, _, footer)
+          assert(session.settings == settings)
+          assert_prompt(args, prompt_overrides[calls == 1 and variant_name(source_variant) or action])
           local flags = {}; for _, option in ipairs(args) do flags[option] = true end
           assert(flags["--expect=f6,f7,f8,f9,f10"])
           assert(flags["--bind=f1:accept"] and flags["--bind=alt-v:accept"] and flags["--bind=f2:abort"])
@@ -752,29 +789,38 @@ print("Refresh session: transitions, retry identity, generation guards and accep
 do
   local saved_picker, saved_candidates = runtime.run_picker, core.candidates
   local saved_current, saved_snapshot = runtime.current_workspace, core.snapshot_candidates
-  local expected_settings = config.decode('{"preview":{"enabled_by_default":false}}')
+  local expected_settings = config.decode(json.encode({ preview = { enabled_by_default = false },
+    prompt = { variants = prompt_overrides } }))
+  local active_prompt
   local origin = "original-space"
   runtime.current_workspace = function() return origin end
   core.candidates = function() return { "one\tpreview\told label" }, "@header\t-\theader" end
   core.snapshot_candidates = function(snapshot, kind, scope, current, settings)
     assert(settings == expected_settings)
+    equal(settings.prompt.variants[kind .. "_" .. scope], active_prompt)
     equal(current, "original-space")
     equal(snapshot, { fresh = true })
     assert(scope == "current" and (kind == "tabs" or kind == "agents"))
     return { "one\tnew-preview\tnew label" }, "@header\t-\tnew header"
   end
-  runtime.run_picker = function(_, _, _, _, session, render)
+  runtime.run_picker = function(_, args, _, _, session, render)
     assert(session.settings == expected_settings)
+    assert_prompt(args, active_prompt)
     origin = "changed-space"
     local generation = session:begin_refresh("one")
+    assert(session:fail(generation))
+    assert_prompt(args, active_prompt)
+    generation = session:begin_refresh(nil)
     local rows, header = render({ fresh = true })
     assert(session:publish(generation, rows, header))
     equal(session:accept(rows[1]), "one")
+    assert_prompt(args, active_prompt)
     session:close()
     return 130, "", "", 0
   end
   for _, kind in ipairs({ "tabs", "agents" }) do
     origin = "original-space"
+    active_prompt = prompt_overrides[kind .. "_current"]
     core.pick(kind, "current", expected_settings)
   end
   runtime.run_picker, core.candidates = saved_picker, saved_candidates

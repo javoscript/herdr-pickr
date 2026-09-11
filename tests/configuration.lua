@@ -156,13 +156,66 @@ deps.read_file = function() return "{}", "close failed" end
 fails(function() config.load(deps) end, "/fixture settings/config.json: close failed")
 print("Configuration: preview and popup defaults, partial overrides, strict validation and read errors OK")
 
-local contents = '{"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120}}'
+for _, text in ipairs({ '{}', '{"prompt":null}', '{"prompt":{}}',
+  '{"prompt":{"default":null,"variants":null}}' }) do
+  local settings = config.decode(text)
+  equal(settings.prompt.default, "Search: ")
+  for variant in pairs(keymap.variants) do equal(settings.prompt.variants[variant], "Search: ") end
+end
+for _, global in ipairs({ 'null', '"Find: "', '""' }) do
+  for variant in pairs(keymap.variants) do
+    for _, value in ipairs({ 'null', '""', json.encode("  ◉ ' $(touch nope); +change-prompt(x) ") }) do
+      local settings = config.decode('{"prompt":{"default":' .. global
+        .. ',"variants":{"' .. variant .. '":' .. value .. '}}}')
+      local inherited = global == 'null' and "Search: " or json.decode(global)
+      equal(settings.prompt.default, inherited)
+      for name in pairs(keymap.variants) do
+        equal(settings.prompt.variants[name], name == variant and value ~= 'null' and json.decode(value) or inherited)
+      end
+      equal(settings.theme_name, "catppuccin")
+      equal(settings.popup.width, "80%")
+      equal(settings.preview.enabled_by_default, true)
+      equal(settings.keymap.keys.refresh[1], "ctrl-l")
+    end
+  end
+end
+for _, variants in ipairs({ '', ',"variants":null' }) do
+  for name in pairs(keymap.variants) do
+    equal(config.decode('{"prompt":{"default":"Find: "' .. variants .. '}}').prompt.variants[name], "Find: ")
+    equal(config.decode('{"prompt":{"variants":{"' .. name .. '":"Custom: "}}}').prompt.variants[name], "Custom: ")
+  end
+end
+local invalid_prompts = {
+  { '{"prompt":{"typo":null}}', "prompt.typo" },
+  { '{"prompt":{"variants":{"workspaces":null}}}', "prompt.variants.workspaces" },
+}
+for _, value in ipairs({ 'false', '12', '"text"', '[]' }) do
+  invalid_prompts[#invalid_prompts + 1] = { '{"prompt":' .. value .. '}', "prompt" }
+  invalid_prompts[#invalid_prompts + 1] = { '{"prompt":{"variants":' .. value .. '}}', "prompt.variants" }
+end
+for _, value in ipairs({ 'false', '12', '[]', '{}', '"a\\u0000b"', '"a\\rb"', '"a\\nb"' }) do
+  invalid_prompts[#invalid_prompts + 1] = { '{"prompt":{"default":' .. value .. '}}', "prompt.default" }
+  for variant in pairs(keymap.variants) do
+    invalid_prompts[#invalid_prompts + 1] = {
+      '{"prompt":{"variants":{"' .. variant .. '":' .. value .. '}}}', "prompt.variants." .. variant }
+  end
+end
+for _, fixture in ipairs(invalid_prompts) do
+  fails(function() config.decode(fixture[1]) end, fixture[2])
+  deps.read_file = function() return fixture[1] end
+  fails(function() config.load(deps) end, "/fixture settings/config.json: " .. fixture[2])
+end
+print("Configuration: prompt inheritance, five variants, literal/empty strings and field/path diagnostics OK")
+
+local contents = '{"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120},'
+  .. '"prompt":{"default":"Original: ","variants":{"spaces":"","agents_all":"Agents: "}}}'
 local loads = 0
 local launch_deps = { getenv = function(key) return env[key] end,
   read_file = function() loads = loads + 1; return contents end }
 local launched = config.load(launch_deps)
 local handoff = config.snapshot(launched)
-contents = '{"theme":{"name":"rose-pine"},"preview":{"enabled_by_default":false}}'
+contents = '{"theme":{"name":"rose-pine"},"preview":{"enabled_by_default":false},'
+  .. '"prompt":{"default":"Edited: ","variants":{"spaces":"Spaces: ","agents_all":"New agents: "}}}'
 local owner = config.owner({ getenv = function(key)
   equal(key, "PICKR_SETTINGS_SNAPSHOT"); return handoff
 end, read_file = function() error("Owner must not reread launcher settings") end })
@@ -171,8 +224,33 @@ equal(owner.theme_name, "terminal")
 equal(owner.popup.width, 120)
 equal(#owner.keymap.keys.refresh, 0)
 equal(owner.roles.background.kind, "default")
-equal(config.owner(launch_deps).theme_name, "rose-pine")
+equal(owner.prompt.default, "Original: ")
+for variant in pairs(keymap.variants) do
+  equal(owner.prompt.variants[variant], launched.prompt.variants[variant])
+end
+local reopened = config.owner(launch_deps)
+equal(reopened.theme_name, "rose-pine")
+equal(reopened.prompt.default, "Edited: ")
+equal(reopened.prompt.variants.tabs_current, "Edited: ")
+equal(reopened.prompt.variants.spaces, "Spaces: ")
+equal(reopened.prompt.variants.agents_all, "New agents: ")
 equal(loads, 2)
+local mutations = {
+  function(s) s.prompt = nil end,
+  function(s) s.prompt.default = nil end,
+  function(s) s.prompt.variants = nil end,
+  function(s) s.prompt.default = false end,
+  function(s) s.prompt.variants.spaces = "bad\n" end,
+}
+for variant in pairs(keymap.variants) do
+  mutations[#mutations + 1] = function(s) s.prompt.variants[variant] = nil end
+end
+for _, mutate in ipairs(mutations) do
+  local settings = config.decode("{}")
+  mutate(settings)
+  fails(function() config.owner({ getenv = function() return config.snapshot(settings) end,
+    read_file = function() error("Invalid handoffs must not reread") end }) end, "PICKR_SETTINGS_SNAPSHOT")
+end
 for _, snapshot in ipairs({ "", "null", "{}", '{"version":2}', '{"version":1,"settings":{}}' }) do
   fails(function() config.owner({ getenv = function() return snapshot end }) end, "PICKR_SETTINGS_SNAPSHOT")
 end
