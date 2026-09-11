@@ -1,10 +1,4 @@
-# picker-refresh Specification
-
-## Purpose
-
-Let users refresh open pickers on demand to see current statuses and metadata while retaining their search, preview visibility, and selection context.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Manual refresh is available in every picker
 

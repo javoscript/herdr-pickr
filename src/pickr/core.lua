@@ -1,13 +1,15 @@
 local runtime = require("pickr.runtime")
+local themes = require("pickr.themes")
+local default_roles = themes.resolve()
 local M = {}
 
--- Herdr 0.9.0 status priority, dot glyphs, and Rosé Pine palette colors.
+-- Herdr 0.9.0 status priority and glyphs are independent of presentation.
 local statuses = {
-	blocked = { priority = 4, icon = "●", color = "235;111;146" },
-	done = { priority = 3, icon = "●", color = "156;207;216" },
-	working = { priority = 2, icon = "●", color = "246;193;119" },
-	idle = { priority = 1, icon = "○", color = "49;116;143" },
-	unknown = { priority = 0, icon = "·", color = "110;106;134" },
+	blocked = { priority = 4, icon = "●" },
+	done = { priority = 3, icon = "●" },
+	working = { priority = 2, icon = "●" },
+	idle = { priority = 1, icon = "○" },
+	unknown = { priority = 0, icon = "·" },
 }
 
 local function status_style(item)
@@ -18,9 +20,10 @@ local function status_text(item)
 	return statuses[item.agent_status] and item.agent_status ~= "unknown" and item.agent_status or "-"
 end
 
-local function indicator(item)
+local function indicator(item, roles)
 	local style = status_style(item)
-	return "\27[38;2;" .. style.color .. "m" .. style.icon .. "\27[0m"
+	local status = statuses[item.agent_status] and item.agent_status or "unknown"
+	return themes.ansi(roles["status_" .. status]) .. style.icon .. "\27[0m"
 end
 
 local function value(text, fallback)
@@ -41,7 +44,6 @@ local function clean(text)
 end
 
 local DIRECTORY_LIMIT = 48
-local MUTED_ANNOTATION = "\27[38;2;82;79;103m"
 
 local function directory_label(path)
 	path = clean(value(path, "—"))
@@ -72,7 +74,8 @@ local function tab_directories(snapshot)
 	return directories, targets
 end
 
-function M.aligned_rows(entries, header)
+function M.aligned_rows(entries, header, roles)
+	local annotation = themes.ansi((roles or default_roles).annotation)
 	if header then
 		local combined = { header }
 		for _, entry in ipairs(entries) do
@@ -96,11 +99,11 @@ function M.aligned_rows(entries, header)
 			if suffix then
 				-- Style only after cleaning/measuring, preserving column alignment.
 				text = text:sub(1, #text - #suffix)
-					.. MUTED_ANNOTATION
+					.. annotation
 					.. suffix
 					.. "\27[0m"
 				if i == entry.parent_field and text:sub(1, #"└─ ") == "└─ " then
-					text = MUTED_ANNOTATION .. "└─ \27[0m" .. text:sub(#"└─ " + 1)
+					text = annotation .. "└─ \27[0m" .. text:sub(#"└─ " + 1)
 				end
 			end
 			fields[#fields + 1] = text .. (i < #entry and string.rep(" ", widths[i] - utf8.len(entry[i])) or "")
@@ -180,13 +183,14 @@ local function grouped_workspaces(workspaces)
 	return ordered
 end
 
-function M.candidates(kind, scope)
+function M.candidates(kind, scope, settings)
 	-- One consistent snapshot includes server-aggregated statuses and remembered
 	-- tab focus, including inactive tabs (PaneInfo.focused is only global focus).
-	return M.snapshot_candidates(runtime.herdr("api", "snapshot").snapshot, kind, scope, runtime.current_workspace())
+	return M.snapshot_candidates(runtime.herdr("api", "snapshot").snapshot, kind, scope, runtime.current_workspace(), settings)
 end
 
-function M.snapshot_candidates(snapshot, kind, scope, current)
+function M.snapshot_candidates(snapshot, kind, scope, current, settings)
+	local roles = settings and settings.roles or default_roles
 	local workspaces = grouped_workspaces(snapshot.workspaces)
 	local directories, targets = tab_directories(snapshot)
 	local names, entries, parent_suffixes = {}, {}, {}
@@ -233,11 +237,11 @@ function M.snapshot_candidates(snapshot, kind, scope, current)
 			add_space(entry, workspace.workspace_id)
 			entry[#entry + 1] = workspace.tab_count .. " tabs"
 			entry[#entry + 1] = directory_label(directories[workspace.active_tab_id])
-			entry.indicator = indicator(workspace)
+			entry.indicator = indicator(workspace, roles)
 			entry.preview_pane = targets[workspace.active_tab_id]
 			entries[#entries + 1] = entry
 		end
-		return M.aligned_rows(entries, column_header(kind, scope))
+		return M.aligned_rows(entries, column_header(kind, scope), roles)
 	end
 
 	local tabs = {}
@@ -266,7 +270,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current)
 		end
 		for _, tab in ipairs(tabs) do
 			local entry = { tab.tab_id, status_text(tab) }
-			entry.indicator = indicator(tab)
+			entry.indicator = indicator(tab, roles)
 			entry.preview_pane = targets[tab.tab_id]
 			if scope == "all" then
 				add_space(entry, tab.workspace_id)
@@ -276,7 +280,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current)
 			entry[#entry + 1] = directory_label(directories[tab.tab_id])
 			entries[#entries + 1] = entry
 		end
-		return M.aligned_rows(entries, column_header(kind, scope))
+		return M.aligned_rows(entries, column_header(kind, scope), roles)
 	end
 
 	local pane_labels = {}
@@ -311,7 +315,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current)
 	for _, item in ipairs(agents) do
 		local agent = item.agent
 		local entry = { agent.pane_id, status_text(agent) }
-		entry.indicator = indicator(agent)
+		entry.indicator = indicator(agent, roles)
 		entry.preview_pane = agent.pane_id
 		if scope == "all" then
 			add_space(entry, agent.workspace_id)
@@ -329,7 +333,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current)
 		end
 		entries[#entries + 1] = entry
 	end
-	return M.aligned_rows(entries, column_header(kind, scope))
+	return M.aligned_rows(entries, column_header(kind, scope), roles)
 end
 
 function M.preview(pane_id)
@@ -348,13 +352,7 @@ function M.preview(pane_id)
 	return output
 end
 
-local picker_shortcuts = {
-	["ctrl-r"] = { "tabs", "current" },
-	["ctrl-t"] = { "tabs", "all" },
-	["ctrl-s"] = { "workspaces", "all" },
-	["ctrl-a"] = { "agents", "current" },
-	["ctrl-g"] = { "agents", "all" },
-}
+local keymap = require("pickr.keymap")
 
 local Session = {}
 Session.__index = Session
@@ -411,14 +409,16 @@ function Session:close()
 	self.state, self.active = "closed", {}
 end
 
-local function pick_once(kind, scope)
-	local rows, header = M.candidates(kind, scope)
+local function pick_once(kind, scope, settings, popup)
+	local rows, header = M.candidates(kind, scope, settings)
 	local origin = runtime.current_workspace()
 	local session = M.new_session(rows, header)
+	session.settings = settings
+	session.popup = popup
+	local expect = keymap.expect(settings.keymap)
+	session.has_expect = #expect > 0
 	local function footer(count)
-		return (count > 0 and "enter: switch" or "no entries")
-			.. " · ctrl+l: refresh · ctrl+p: preview · esc: close"
-			.. "\nctrl+r: tabs here · ctrl+t: all tabs · ctrl+s: spaces · ctrl+a: agents here · ctrl+g: all agents"
+		return keymap.footer(settings.keymap, count)
 	end
 	local search_fields = {}
 	for i = 2, #column_header(kind, scope) do
@@ -440,32 +440,41 @@ local function pick_once(kind, scope)
 		"--header-lines=1",
 		"--with-shell=/bin/sh -c",
 		"--preview=" .. runtime.preview_command(),
-		"--preview-window=right:50%:border-left:nowrap",
-		"--expect=ctrl-r,ctrl-t,ctrl-s,ctrl-a,ctrl-g",
-		-- Rosé Pine (original dark palette).
-		"--color=bg:#191724,bg+:#26233a,fg:#908caa,fg+:#e0def4",
-		"--color=hl:#ebbcba,hl+:#ebbcba,info:#c4a7e7,marker:#eb6f92",
-		"--color=prompt:#c4a7e7,spinner:#f6c177,pointer:#eb6f92",
-		"--color=header:#6e6a86,footer:#6e6a86,border:#403d52,label:#e0def4",
+		"--preview-window=right:50%:border-left:nowrap" .. (popup.preview_visible and "" or ":hidden"),
+		themes.options(settings.roles),
 		"--border-label=" .. title,
 		"--footer=" .. footer(#rows),
-		"--bind=esc:abort,ctrl-c:abort,enter:accept,ctrl-p:toggle-preview",
 	}
+	if session.has_expect then args[#args + 1] = "--expect=" .. table.concat(expect, ",") end
+	for _, key in ipairs({ "enter", "esc", "ctrl-c", "ctrl-g", "ctrl-q", "ctrl-z", "double-click" }) do
+		args[#args + 1] = "--bind=" .. key .. ":ignore"
+	end
+	args[#args + 1] = "--bind=ctrl-d:delete-char"
+	local inherited = {}
+	for key in pairs(settings.fzf_bindings or {}) do inherited[#inherited + 1] = key end
+	table.sort(inherited)
+	for _, key in ipairs(inherited) do
+		args[#args + 1] = "--bind=" .. key .. ":" .. settings.fzf_bindings[key]
+	end
+	for _, key in ipairs(settings.keymap.keys.accept) do args[#args + 1] = "--bind=" .. key .. ":accept" end
+	for _, key in ipairs(settings.keymap.keys.close) do args[#args + 1] = "--bind=" .. key .. ":abort" end
 	if kind ~= "tabs" or scope == "all" then
 		args[#args + 1] = "--no-sort"
 	end
 	local code, output, errors, signal, target =
 		runtime.run_picker("fzf", args, header .. "\n" .. table.concat(rows, "\n"), runtime.fzf_env(), session,
 			function(snapshot)
-				local fresh, heading = M.snapshot_candidates(snapshot, kind, scope, origin)
+				local fresh, heading = M.snapshot_candidates(snapshot, kind, scope, origin, settings)
 				M.new_session(fresh, heading) -- Validate the whole generation before publishing any rows.
 				return fresh, heading
 			end, footer)
 	-- --expect emits the pressed shortcut on the first line (blank for Enter).
 	-- A shortcut can exit with code 1 when there are no matching rows.
-	local key, selected = output:match("^([^\n]*)\n(.*)$")
-	if (code == 0 or code == 1) and (not signal or signal == 0) and picker_shortcuts[key] then
-		return picker_shortcuts[key]
+	local key, selected = "", output
+	if session.has_expect then key, selected = output:match("^([^\n]*)\n(.*)$") end
+	local destination = keymap.variants[settings.keymap.reverse[key]]
+	if (code == 0 or code == 1) and (not signal or signal == 0) and destination then
+		return destination
 	end
 	if code == 1 or code == 130 or signal == 2 then
 		return
@@ -487,9 +496,11 @@ local function pick_once(kind, scope)
 	error("Picker returned an unknown selection", 0)
 end
 
-function M.pick(kind, scope)
+function M.pick(kind, scope, settings)
+	settings = settings or require("pickr.config").owner()
+	local popup = { preview_visible = settings.preview.enabled_by_default }
 	while true do
-		local next_picker = pick_once(kind, scope)
+		local next_picker = pick_once(kind, scope, settings, popup)
 		if not next_picker then
 			return
 		end

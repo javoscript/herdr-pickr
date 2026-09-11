@@ -9,9 +9,10 @@ local ok, message = pcall(function()
   local valid = { ["tabs-current"] = true, ["tabs-all"] = true, spaces = true,
     ["agents-current"] = true, ["agents-all"] = true }
   assert(valid[arg[1]] and not arg[2], "Invalid Pickr entrypoint")
+  local config = require("pickr.config")
+  local settings = config.load()
   local workspace = assert(runtime.current_workspace(), "Missing action workspace context")
-  runtime.herdr("plugin", "pane", "open", "--plugin", "javoscript.herdr-pickr",
-    "--entrypoint", arg[1], "--env", "PICKR_ORIGIN_WORKSPACE_ID=" .. workspace)
+  runtime.open_popup(arg[1], workspace, settings)
 end)
 if not ok then
   io.stderr:write("Pickr: " .. tostring(message) .. "\n")

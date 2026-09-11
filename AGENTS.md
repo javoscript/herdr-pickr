@@ -7,6 +7,16 @@ with terminal previews. It uses Lua 5.3+, `luv`, and `fzf` from PATH.
 
 See `README.md` for usage, project structure, and regression-check instructions.
 
+## Language Guidelines
+
+- Prefer Lua for all project code, including scripts, tooling, and tests.
+
+## Documentation Guidelines
+
+- After making changes to the codebase, review and update `README.md` as needed
+  to keep usage, behavior, dependencies, project structure, and regression-check
+  instructions accurate.
+
 ## Commit Guidelines
 
 - Commits should be made following the Conventional Commits format.

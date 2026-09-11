@@ -140,6 +140,9 @@ end
 -- Decode
 -------------------------------------------------------------------------------
 
+-- Pickr extension: opt-in strict decoding preserves container types and null
+-- for configuration validation. The default metadata decoder is unchanged.
+json.null, json.array, json.object = {}, {}, {}
 local parse
 
 local function create_set(...)
@@ -256,10 +259,20 @@ local function parse_string(str, i)
 end
 
 
-local function parse_number(str, i)
+local function parse_number(str, i, strict)
   local x = next_char(str, i, delim_chars)
   local s = str:sub(i, x - 1)
   local n = tonumber(s)
+  if strict then
+    local mantissa, exponent = s:match("^(.-)[eE]([+-]?%d+)$")
+    mantissa = mantissa or s
+    local integer, fraction = mantissa:match("^(-?%d+)%.(%d+)$")
+    integer = integer or mantissa
+    local digits = integer:gsub("^-", "")
+    if not integer:match("^-?%d+$") or (#digits > 1 and digits:sub(1, 1) == "0")
+      or (mantissa:find("%.") and not fraction) or (s:find("[eE]") and not exponent)
+      or n == math.huge or n == -math.huge then n = nil end
+  end
   if not n then
     decode_error(str, i, "invalid number '" .. s .. "'")
   end
@@ -267,18 +280,19 @@ local function parse_number(str, i)
 end
 
 
-local function parse_literal(str, i)
+local function parse_literal(str, i, strict)
   local x = next_char(str, i, delim_chars)
   local word = str:sub(i, x - 1)
   if not literals[word] then
     decode_error(str, i, "invalid literal '" .. word .. "'")
   end
+  if strict and word == "null" then return json.null, x end
   return literal_map[word], x
 end
 
 
-local function parse_array(str, i)
-  local res = {}
+local function parse_array(str, i, strict)
+  local res = strict and setmetatable({}, json.array) or {}
   local n = 1
   i = i + 1
   while 1 do
@@ -290,7 +304,7 @@ local function parse_array(str, i)
       break
     end
     -- Read token
-    x, i = parse(str, i)
+    x, i = parse(str, i, strict)
     res[n] = x
     n = n + 1
     -- Next token
@@ -299,13 +313,16 @@ local function parse_array(str, i)
     i = i + 1
     if chr == "]" then break end
     if chr ~= "," then decode_error(str, i, "expected ']' or ','") end
+    if strict and str:sub(next_char(str, i, space_chars, true), next_char(str, i, space_chars, true)) == "]" then
+      decode_error(str, i, "trailing comma in array")
+    end
   end
   return res, i
 end
 
 
-local function parse_object(str, i)
-  local res = {}
+local function parse_object(str, i, strict)
+  local res = strict and setmetatable({}, json.object) or {}
   i = i + 1
   while 1 do
     local key, val
@@ -319,7 +336,7 @@ local function parse_object(str, i)
     if str:sub(i, i) ~= '"' then
       decode_error(str, i, "expected string for key")
     end
-    key, i = parse(str, i)
+    key, i = parse(str, i, strict)
     -- Read ':' delimiter
     i = next_char(str, i, space_chars, true)
     if str:sub(i, i) ~= ":" then
@@ -327,7 +344,7 @@ local function parse_object(str, i)
     end
     i = next_char(str, i + 1, space_chars, true)
     -- Read value
-    val, i = parse(str, i)
+    val, i = parse(str, i, strict)
     -- Set
     res[key] = val
     -- Next token
@@ -336,6 +353,9 @@ local function parse_object(str, i)
     i = i + 1
     if chr == "}" then break end
     if chr ~= "," then decode_error(str, i, "expected '}' or ','") end
+    if strict and str:sub(next_char(str, i, space_chars, true), next_char(str, i, space_chars, true)) == "}" then
+      decode_error(str, i, "trailing comma in object")
+    end
   end
   return res, i
 end
@@ -362,21 +382,21 @@ local char_func_map = {
 }
 
 
-parse = function(str, idx)
+parse = function(str, idx, strict)
   local chr = str:sub(idx, idx)
   local f = char_func_map[chr]
   if f then
-    return f(str, idx)
+    return f(str, idx, strict)
   end
   decode_error(str, idx, "unexpected character '" .. chr .. "'")
 end
 
 
-function json.decode(str)
+function json.decode(str, strict)
   if type(str) ~= "string" then
     error("expected argument of type string, got " .. type(str))
   end
-  local res, idx = parse(str, next_char(str, 1, space_chars, true))
+  local res, idx = parse(str, next_char(str, 1, space_chars, true), strict)
   idx = next_char(str, idx, space_chars, true)
   if idx <= #str then
     decode_error(str, idx, "trailing garbage")

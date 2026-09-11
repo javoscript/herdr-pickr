@@ -123,6 +123,8 @@ function M.control_helper(path, event, argument)
 end
 
 function M.run_picker(command, args, input, env, session, render, footer)
+  local keymap, map = require("pickr.keymap"), session.settings.keymap
+  local function gate(operation, actions) return keymap.gate(map, operation, actions) end
   local root = assert(uv.fs_mkdtemp("/tmp/pickr-XXXXXX"))
   local socket, data_path, fzf_socket = root .. "/owner.sock", root .. "/rows", root .. "/fzf.sock"
   local server, peers = uv.new_pipe(false), {}
@@ -176,7 +178,8 @@ function M.run_picker(command, args, input, env, session, render, footer)
   local function failed(generation)
     if session:fail(generation) then
       pending, loaded = nil, false
-      post("change-header(Refresh failed — Ctrl+L to retry)+rebind(ctrl-l)")
+      post(gate("rebind", { "refresh" }) .. "+change-header:Refresh failed — "
+        .. keymap.display(map.keys.refresh) .. " to retry")
     end
   end
   local function start_fetch()
@@ -196,11 +199,14 @@ function M.run_picker(command, args, input, env, session, render, footer)
   local clearing = false
   local function event(request)
     if session.state == "closed" then return "" end
-    if request.event == "refresh" then
+    if request.event == "toggle-preview" then
+      session.popup.preview_visible = not session.popup.preview_visible
+      return "toggle-preview"
+    elseif request.event == "refresh" then
       if not session:begin_refresh(request.argument) then return "" end
       pending, loaded, clearing = nil, false, true
       write_rows({}, session.header)
-      return "unbind(enter)+unbind(ctrl-l)+change-header(Refreshing…)+" .. reload
+      return gate("unbind", { "accept", "refresh" }) .. "+change-header(Refreshing…)+" .. reload
     elseif request.event == "load" then
       if clearing then
         clearing = false
@@ -221,8 +227,7 @@ function M.run_picker(command, args, input, env, session, render, footer)
     elseif request.event == "ready" and pending then
       session:publish(pending.generation, pending.rows, pending.header)
       pending, loaded = nil, false
-      return "change-header()+change-footer(" .. footer(#session.rows)
-        .. ")+rebind(enter)+rebind(ctrl-l)"
+      return gate("rebind", { "accept", "refresh" }) .. "+change-header()+change-footer:" .. footer(#session.rows)
     end
     return ""
   end
@@ -247,10 +252,18 @@ function M.run_picker(command, args, input, env, session, render, footer)
       end)
     end))
     args[#args + 1] = "--listen=" .. fzf_socket
-    args[#args + 1] = "--bind=ctrl-l:transform(" .. helper .. " refresh {1}),load:transform("
-      .. helper .. " load),result-final:transform(" .. helper .. " match {*f1})"
+    -- Synchronous transforms acknowledge each toggle before fzf can process a
+    -- variant exit, including while loading or displaying a refresh failure.
+    for _, key in ipairs(session.settings.keymap.keys.toggle_preview) do
+      args[#args + 1] = "--bind=" .. key .. ":transform(" .. helper .. " toggle-preview)"
+    end
+    for _, key in ipairs(map.keys.refresh) do
+      args[#args + 1] = "--bind=" .. key .. ":transform(" .. helper .. " refresh {1})"
+    end
+    args[#args + 1] = "--bind=load:transform(" .. helper .. " load),result-final:transform(" .. helper .. " match {*f1})"
     fzf = M.spawn(command, args, input, env, nil, function(failure, code, output, errors, signal)
       local selected = output:match("^\n(.*)$")
+      if not session.has_expect then selected = output end
       answer = { code, output, errors, signal, selected and session:accept(selected:gsub("\n+$", "")) }
       if failure and not terminal_error then terminal_error = failure end
       shutdown()
@@ -300,9 +313,7 @@ function M.read_visible(pane_id)
   return output
 end
 
-function M.focus_agent_pane(pane_id)
-  -- In Herdr 0.9.0, agent.focus does not move the client's workspace/tab view.
-  -- pane.focus does, but the CLI only exposes directional pane focus.
+function M.socket_request(method, params, id, timeout)
   local path = assert(os.getenv("HERDR_SOCKET_PATH"), "Missing HERDR_SOCKET_PATH")
   local connection, timer = uv.new_pipe(false), uv.new_timer()
   local chunks, response, failure, finished = {}, nil, nil, false
@@ -312,7 +323,7 @@ function M.focus_agent_pane(pane_id)
     close(connection)
     close(timer)
   end
-  timer:start(5000, 0, function() finish("Herdr pane.focus timed out") end)
+  timer:start(timeout or 5000, 0, function() finish("Herdr " .. method .. " timed out") end)
   connection:connect(path, function(err)
     if finished then return end
     if err then finish(err); return end
@@ -325,14 +336,39 @@ function M.focus_agent_pane(pane_id)
       if line then finish(nil, line) end
     end)
     connection:write(json.encode({
-      id = "pickr:focus", method = "pane.focus", params = { pane_id = pane_id },
+      id = id, method = method, params = params,
     }) .. "\n", function(write_error)
       if write_error then finish(write_error) end
     end)
   end)
   uv.run()
   if failure then error(failure, 0) end
-  local reply = result(response)
+  local decoded = json.decode(response)
+  assert(decoded.id == id, "Herdr returned an unexpected response ID")
+  return result(response)
+end
+
+function M.open_popup(entrypoint, workspace, settings)
+  local reply = M.socket_request("plugin.pane.open", {
+    plugin_id = "javoscript.herdr-pickr", entrypoint = entrypoint,
+    -- Herdr popups target the active pane and reject explicit workspace targets.
+    -- Preserve picker scope through the environment instead.
+    placement = "popup", focus = true,
+    width = settings.popup.width, height = settings.popup.height,
+    env = { PICKR_ORIGIN_WORKSPACE_ID = workspace,
+      PICKR_SETTINGS_SNAPSHOT = require("pickr.config").snapshot(settings) },
+  }, "pickr:open")
+  local pane = reply.plugin_pane
+  assert(reply.type == "plugin_pane_opened" and type(pane) == "table"
+    and pane.plugin_id == "javoscript.herdr-pickr" and pane.entrypoint == entrypoint
+    and type(pane.pane) == "table" and type(pane.pane.pane_id) == "string"
+    and pane.pane.pane_id ~= "", "Herdr did not confirm the requested popup")
+  return pane
+end
+
+function M.focus_agent_pane(pane_id)
+  -- pane.focus also moves the client's workspace/tab view in Herdr 0.9.0.
+  local reply = M.socket_request("pane.focus", { pane_id = pane_id }, "pickr:focus")
   if not reply.pane or reply.pane.pane_id ~= pane_id then
     error("Herdr did not confirm the selected pane", 0)
   end
