@@ -45,6 +45,7 @@ local function clean(text)
 end
 
 local DIRECTORY_LIMIT = 48
+local MUTED_ANNOTATION = "\27[38;2;82;79;103m"
 
 local function directory_label(path)
 	path = clean(value(path, "—"))
@@ -95,14 +96,15 @@ function M.aligned_rows(entries, header)
 		local fields = {}
 		for i = 2, #entry do
 			local text = entry[i]
-			if i == entry.parent_field and entry.parent_suffix then
+			local suffix = entry.muted_suffixes and entry.muted_suffixes[i]
+			if suffix then
 				-- Style only after cleaning/measuring, preserving column alignment.
-				text = text:sub(1, #text - #entry.parent_suffix)
-					.. "\27[38;2;82;79;103m"
-					.. entry.parent_suffix
+				text = text:sub(1, #text - #suffix)
+					.. MUTED_ANNOTATION
+					.. suffix
 					.. "\27[0m"
-				if text:sub(1, #"└─ ") == "└─ " then
-					text = "\27[38;2;82;79;103m└─ \27[0m" .. text:sub(#"└─ " + 1)
+				if i == entry.parent_field and text:sub(1, #"└─ ") == "└─ " then
+					text = MUTED_ANNOTATION .. "└─ \27[0m" .. text:sub(#"└─ " + 1)
 				end
 			end
 			fields[#fields + 1] = text .. (i < #entry and string.rep(" ", widths[i] - utf8.len(entry[i])) or "")
@@ -130,10 +132,10 @@ local function column_header(kind, scope)
 		header[#header + 1] = "tabs"
 		header[#header + 1] = "directory"
 	elseif kind == "tabs" then
-		header[#header + 1] = "tab"
 		if scope == "all" then
 			header[#header + 1] = "space"
 		end
+		header[#header + 1] = "tab"
 		header[#header + 1] = "panes"
 		header[#header + 1] = "directory"
 	else
@@ -220,7 +222,7 @@ function M.candidates(kind, scope)
 	local function add_space(entry, workspace_id)
 		entry[#entry + 1] = names[workspace_id] or workspace_id
 		entry.parent_field = #entry
-		entry.parent_suffix = parent_suffixes[workspace_id]
+		entry.muted_suffixes = { [#entry] = parent_suffixes[workspace_id] }
 	end
 	local current = runtime.current_workspace()
 	if scope == "current" and not current then
@@ -264,12 +266,13 @@ function M.candidates(kind, scope)
 			end)
 		end
 		for _, tab in ipairs(tabs) do
-			local entry = { tab.tab_id, status_text(tab), value(tab.label, tab.tab_id) }
+			local entry = { tab.tab_id, status_text(tab) }
 			entry.indicator = indicator(tab)
 			entry.preview_pane = targets[tab.tab_id]
 			if scope == "all" then
 				add_space(entry, tab.workspace_id)
 			end
+			entry[#entry + 1] = value(tab.label, tab.tab_id)
 			entry[#entry + 1] = tab.pane_count .. " panes"
 			entry[#entry + 1] = directory_label(directories[tab.tab_id])
 			entries[#entries + 1] = entry
@@ -277,6 +280,13 @@ function M.candidates(kind, scope)
 		return M.aligned_rows(entries, column_header(kind, scope))
 	end
 
+	local pane_labels = {}
+	for _, pane in ipairs(snapshot.panes) do
+		local label = value(pane.label)
+		if label ~= "" then
+			pane_labels[pane.pane_id] = clean(label)
+		end
+	end
 	local tab_names = {}
 	for _, tab in ipairs(tabs) do
 		tab_names[tab.tab_id] = value(tab.label, tab.tab_id)
@@ -311,6 +321,13 @@ function M.candidates(kind, scope)
 		entry[#entry + 1] = value(agent.name, value(agent.agent))
 		entry[#entry + 1] = value(agent.terminal_title_stripped, value(agent.terminal_title))
 		entry[#entry + 1] = agent.pane_id
+		local label = pane_labels[agent.pane_id]
+		if label then
+			local suffix = "[" .. label .. "]"
+			entry[#entry] = entry[#entry] .. " " .. suffix
+			entry.muted_suffixes = entry.muted_suffixes or {}
+			entry.muted_suffixes[#entry] = suffix
+		end
 		entries[#entries + 1] = entry
 	end
 	return M.aligned_rows(entries, column_header(kind, scope))

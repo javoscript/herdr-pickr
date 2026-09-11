@@ -94,9 +94,19 @@ selection fields consistent.
 | --- | --- |
 | Spaces | status · space · tabs · directory |
 | Current-space tabs | status · tab · panes · directory |
-| All-spaces tabs | status · tab · space · panes · directory |
+| All-spaces tabs | status · space · tab · panes · directory |
 | Current-space agents | status · tab · agent · title · pane |
 | All-spaces agents | status · space · tab · agent · title · pane |
+
+Columns follow the shared relative order: status, space, tab, agent, title, pane,
+directory. Each picker includes only its existing columns; the count headings
+`tabs` and `panes` retain their names and occupy the tab and pane positions.
+
+Both agent pickers show labeled panes as `pane-id [label]` in the `pane` column.
+The bracketed label uses the same subdued gray (`#524f67`) as worktree parent
+annotations. Panes with missing or empty labels show only their pane ID.
+Labels remain searchable within the pane column; previews and selection target
+the underlying pane ID.
 
 The two bottom hint lines remain in the footer.
 
@@ -106,7 +116,7 @@ Each space-separated search term fuzzy-matches within an individual column.
 A term cannot start in one column and finish in another. Different terms can
 match different columns: with `alpha` and `beta` in separate columns, `abt`
 does not match, but `alp bet` does. All visible columns remain searchable,
-including status text, parent-space annotations, and the displayed directory.
+including status text, parent-space annotations, pane labels, and the displayed directory.
 Standard fzf extended-search syntax (exact matches, negation, and OR) still works.
 
 The column separators are included in fzf's delimiter, and `--nth` lists each

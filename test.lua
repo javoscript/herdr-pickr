@@ -64,7 +64,7 @@ local tabs = {
 }
 local home = assert(os.getenv("HOME"))
 local panes = {
-  { pane_id = "w1:p1", cwd = "/wrong-first-pane" },
+  { pane_id = "w1:p1", cwd = "/wrong-first-pane", label = "review-é\nqueue\t[one]" },
   { pane_id = "w1:p2", cwd = "/shell", foreground_cwd = home .. "/Projects/é", focused = false },
   { pane_id = "w1:p3", cwd = "/active-tab", foreground_cwd = "" },
   { pane_id = "w2:p1" },
@@ -108,7 +108,7 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
   local expected_headers = {
     ["workspaces:all"] = "status · space · tabs · directory",
     ["tabs:current"] = "status · tab · panes · directory",
-    ["tabs:all"] = "status · tab · space · panes · directory",
+    ["tabs:all"] = "status · space · tab · panes · directory",
     ["agents:current"] = "status · tab · agent · title · pane",
     ["agents:all"] = "status · space · tab · agent · title · pane",
   }
@@ -149,6 +149,44 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
   runtime.run = function() return 0, "\n" .. header .. "\n", "", 0 end
   assert(not pcall(core.pick, table.unpack(mode)), "Header must not be a valid selection")
 end
+-- Pane labels are display-only suffixes, searchable through production fzf flags.
+for _, scope in ipairs({ "current", "all" }) do
+  local rows = core.candidates("agents", scope)
+  assert(rows[1]:find("w1:p1 \27[38;2;82;79;103m[review-é queue [one]]\27[0m", 1, true))
+  equal(rows[1]:match("^([^\t]+)\t([^\t]+)"), "w1:p1")
+  equal(rows[1]:match("^[^\t]+\t([^\t]+)"), "w1:p1")
+  assert(plain(rows[2]):match("  ·  w1:p2$"))
+  for _, fixture in ipairs({ {}, { label = "" }, json.decode('{"label":null}') }) do
+    local saved_pane = panes[1]
+    fixture.pane_id = "w1:p1"
+    panes[1] = fixture
+    assert(plain(core.candidates("agents", scope)[1]):match("  ·  w1:p1$"))
+    panes[1] = saved_pane
+  end
+  local saved_pane = table.remove(panes, 1)
+  assert(plain(core.candidates("agents", scope)[1]):match("  ·  w1:p1$"))
+  table.insert(panes, 1, saved_pane)
+
+  -- Match several agents to check priority order survives label filtering.
+  panes[2].label, panes[4].label = "review second", "review other-space"
+  local expected = core.candidates("agents", scope)
+  runtime.run = function(command, args, input, env)
+    args[#args + 1] = "--filter=review"
+    local code, output, errors, signal = original_run(command, args, input, env, 5000)
+    equal(code, 0)
+    local displays = {}
+    for _, row in ipairs(expected) do displays[#displays + 1] = plain(row) end
+    equal(output, table.concat(displays, "\n") .. "\n")
+    -- Accept the first filtered row as an interactive picker would.
+    return code, "\n" .. plain(expected[1]) .. "\n", errors, signal
+  end
+  focus_calls = {}
+  core.pick("agents", scope)
+  equal(focus_calls, { { "pane", "w1:p1" } })
+  runtime.run = original_run
+  panes[2].label, panes[4].label = nil, nil
+end
+print("Pane labels: styling, cleaning, absent metadata, search, ordering and targeting OK")
 equal(core.aligned_rows({}), {})
 equal(core.aligned_rows({ { "id", "a\nb\t", "x" } }), { "id\t-\ta b   ·  x" })
 
@@ -267,9 +305,14 @@ agents = {
   { pane_id = "a-child1:p9", tab_id = "a-child1:t9", workspace_id = "a-child1" },
   { pane_id = "orphan1:p9", tab_id = "orphan1:t9", workspace_id = "orphan1" },
 }
+local saved_worktree_panes = panes
+panes = { { pane_id = "a-child1:p9", label = "review" } }
 local named_agents = core.candidates("agents", "all")
+panes = saved_worktree_panes
 assert(plain(named_agents[1]):find("a-child1 match [a-parent match]", 1, true))
 assert(named_agents[1]:find("\27[38;2;82;79;103m[a-parent match]\27[0m", 1, true))
+assert(named_agents[1]:find("a-child1:p9 \27[38;2;82;79;103m[review]\27[0m", 1, true))
+assert(plain(named_agents[2]):match("  ·  orphan1:p9$"))
 assert(not named_agents[1]:find("└─ ", 1, true))
 assert(not named_agents[2]:find("└─ ", 1, true))
 assert(not named_agents[2]:find("-parent match]", 1, true))
