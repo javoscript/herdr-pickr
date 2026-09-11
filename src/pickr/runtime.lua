@@ -1,8 +1,9 @@
 local uv = require("luv")
-local json = require("json")
+local json = require("pickr.vendor.json")
 local M = {}
 
 local directory = assert(uv.fs_realpath(debug.getinfo(1, "S").source:sub(2))):match("^(.*)/[^/]+$")
+local launcher = assert(directory:match("^(.*)/[^/]+$")) .. "/main.lua"
 
 local function shell_quote(text)
   return "'" .. text:gsub("'", "'\\''") .. "'"
@@ -10,7 +11,7 @@ end
 
 function M.preview_command()
   -- fzf shell-quotes the hidden second field before substituting {2}.
-  return shell_quote(assert(uv.exepath())) .. " " .. shell_quote(directory .. "/main.lua")
+  return shell_quote(assert(uv.exepath())) .. " " .. shell_quote(launcher)
     .. " preview {2}"
 end
 
@@ -19,7 +20,7 @@ local function close(handle)
 end
 
 -- Pipes carry only candidate data/results; fzf uses the popup's /dev/tty for UI.
-M.run = require("process").run
+M.run = require("pickr.process").run
 
 -- The caller owns the event loop. Completion waits for exit and both output
 -- streams; cancellation closes inherited pipes too, so descendants cannot keep
@@ -126,7 +127,7 @@ function M.run_picker(command, args, input, env, session, render, footer)
   local socket, data_path, fzf_socket = root .. "/owner.sock", root .. "/rows", root .. "/fzf.sock"
   local server, peers = uv.new_pipe(false), {}
   local fetch, fzf, terminal_error, answer, pending, loaded
-  local helper = shell_quote(assert(uv.exepath())) .. " " .. shell_quote(directory .. "/main.lua")
+  local helper = shell_quote(assert(uv.exepath())) .. " " .. shell_quote(launcher)
     .. " control " .. shell_quote(socket)
   local function write_rows(rows, header)
     local file = assert(io.open(data_path, "w"))

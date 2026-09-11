@@ -98,20 +98,45 @@ Clone into any directory and link the checkout:
 ```sh
 git clone https://github.com/javoscript/herdr-pickr.git
 herdr plugin link "$(pwd)/herdr-pickr"
-lua ./herdr-pickr/test.lua
+lua ./herdr-pickr/tests/test.lua
 ```
 
 For an existing checkout, run these from its repository root:
 
 ```sh
 herdr plugin link "$(pwd)"
-lua test.lua
+lua tests/test.lua
 ```
 
 Relink after changing the manifest or moving the checkout. Lua edits apply on the
 next launch. Disable with `herdr plugin disable javoscript.herdr-pickr`; unregister
 without deleting source files with `herdr plugin unlink javoscript.herdr-pickr`.
 For a GitHub-managed installation, repeat the install command to update it.
+
+### Source-layout migration and direct invocation
+
+Relink existing development installations after updating to the `src/` layout:
+run `herdr plugin link "$(pwd)"` from the checkout root. Existing qualified action
+IDs and keybindings still work without edits.
+
+Direct script callers must replace `main.lua`, `open.lua`, and `test.lua` with
+`src/main.lua`, `src/open.lua`, and `tests/test.lua`, respectively. The old paths
+have no compatibility wrappers. From the repository root inside Herdr:
+
+```sh
+lua src/open.lua tabs-current
+lua src/main.lua tabs current
+lua src/main.lua tabs all
+lua src/main.lua workspaces all
+lua src/main.lua agents current
+lua src/main.lua agents all
+```
+
+`src/open.lua` opens the named plugin popup and captures the caller's workspace;
+`src/main.lua` runs the picker in the current terminal. From another directory,
+use an absolute or caller-relative path to the script, quoting paths with spaces.
+Source imports and preview/refresh subprocesses resolve from physical script
+locations, independently of the caller's working directory.
 
 ## Migrate from `local.pickr`
 
@@ -199,20 +224,20 @@ variants. Direct plugin pane launches use `HERDR_PLUGIN_CONTEXT_JSON`; standalon
 popup launches can still use `HERDR_ACTIVE_WORKSPACE_ID`.
 
 - `herdr-plugin.toml`: five actions and popup entry points.
-- `open.lua`: action launcher preserving the original workspace.
-- `main.lua`: entry point and module paths (independent of current directory).
-- `core.lua`: candidate lists, column alignment, Rosé Pine theme, selection.
-- `runtime.lua`: Herdr calls, invocation context, and direct `pane.focus` socket requests. This avoids
+- `src/open.lua`: action launcher preserving the original workspace.
+- `src/main.lua`: entry point and module paths (independent of current directory).
+- `src/pickr/core.lua`: candidate lists, column alignment, Rosé Pine theme, selection.
+- `src/pickr/runtime.lua`: Herdr calls, invocation context, and direct `pane.focus` socket requests. This avoids
   Herdr 0.9.0's `agent.focus` client-navigation issue.
-- `lib/process.lua`: bundled subprocess runner with timeouts, using external luv.
-- `lib/vendor/json.lua`: rxi/json.lua 0.1.2, bundled from
+- `src/pickr/process.lua`: bundled subprocess runner with timeouts, using external luv.
+- `src/pickr/vendor/json.lua`: rxi/json.lua 0.1.2, bundled from
   <https://github.com/rxi/json.lua/blob/master/json.lua>, with its MIT license
   retained in the file. JSON null metadata decodes to absent Lua fields.
-- `test.lua`: fixture, socket, and real-subprocess regression checks.
+- `tests/test.lua`: fixture, socket, and real-subprocess regression checks.
 - `LICENSE`: project MIT license, Copyright (c) 2026 javoscript.
 
 Project code is MIT-licensed under `LICENSE`. The bundled JSON library retains
-its separate Copyright (c) 2020 rxi and full MIT notice in `lib/vendor/json.lua`.
+its separate Copyright (c) 2020 rxi and full MIT notice in `src/pickr/vendor/json.lua`.
 Both helper files are distributed with this repository; no parent-directory
 Lua source files are needed.
 
@@ -263,7 +288,7 @@ layout, including inactive tabs. Spaces use that directory from their active
 tab. Foreground CWD takes precedence over shell CWD; unavailable paths show `—`.
 Home paths are abbreviated to `~`. Paths longer than 48 Unicode characters are
 left-truncated with `…`, keeping their last 47 characters. Adjust
-`DIRECTORY_LIMIT` in `core.lua` to change the cap.
+`DIRECTORY_LIMIT` in `src/pickr/core.lua` to change the cap.
 
 ## Column headers
 
@@ -376,7 +401,7 @@ refreshes on selection changes and successful manual refresh; it is not a contin
 
 Rows contain two hidden tab-separated fields: the selection ID and preview pane
 ID. fzf displays the remaining columns and searches each independently, passing the shell-quoted preview
-ID to `main.lua preview <pane-id>`. The preview uses read-only `pane get` and
+ID to `src/main.lua preview <pane-id>`. The preview uses read-only `pane get` and
 `pane read --source visible --ansi --raw` calls. Preview targets come from the
 same successful snapshot generation as the list.
 
@@ -385,7 +410,7 @@ same successful snapshot generation as the list.
 From the repository root, run:
 
 ```sh
-lua test.lua
+lua tests/test.lua
 ```
 
 Tests use fixture data and a temporary local socket rather than focusing live
@@ -396,10 +421,44 @@ captured-original-workspace scoping, and asynchronous subprocess cancellation.
 Interactive refresh behavior requires separate acceptance checks in the picker;
 the temporary PTY harness used during implementation has been removed.
 
+For an isolated relocation check, copy `src/`, `tests/`, `herdr-plugin.toml`,
+`LICENSE`, `README.md`, and `AGENTS.md` into a fresh `Herdr Pickr/` directory.
+Create an empty sibling `caller/` directory; include no old root scripts or
+parent Lua helpers. From `caller/`, run:
+
+```sh
+env -i HOME="$HOME" PATH="$PATH" TMPDIR=/tmp TERM=xterm-256color lua "../Herdr Pickr/tests/test.lua"
+```
+
+This excludes ambient Lua source-path and initialization overrides while checking
+paths with spaces and an unrelated working directory.
+
 ## Compatibility verification
 
-Supported minimums are listed under [Dependencies](#dependencies). These are the
-observed results from publication preparation on 2026-09-11:
+Supported minimums are listed under [Dependencies](#dependencies).
+
+### Source reorganization checks (2026-09-11)
+
+Environment: macOS 26.6.2 (25G83), arm64; Herdr 0.9.0; Lua 5.5.1;
+Homebrew luv 1.52.1-0 (libuv 1.52.1); fzf 0.74.3 (Homebrew);
+Git 2.50.1 (Apple Git-155).
+
+| Check | Result |
+| --- | --- |
+| Syntax checking with `luac -p` | All seven relocated Lua files passed. |
+| Repository-root `lua tests/test.lua` | Full suite passed: five action-launcher fixtures, all 25 switching routes, preview subprocess, refresh-session, async-process, and socket scenarios. |
+| Isolated `Herdr Pickr/` distribution copy, launched from sibling `caller/` | Full suite passed with the clean-environment command under Regression checks, using only `src/`, `tests/`, the manifest, and distribution documents. |
+| Vendored JSON | Git blob hash matches the pre-move file exactly, preserving its copyright and MIT notice. |
+| `herdr plugin link "$(pwd)"` | Succeeded; registered all five actions with `src/open.lua` and all five panes with `src/main.lua`. |
+| Interactive Herdr acceptance | User-verified pass: all five qualified actions and direct pane entrypoints, existing keybindings, current/all-space scope, previews/Ctrl+P, Ctrl+L refresh/control subprocesses, variant switching with preserved origin, and Enter/Escape behavior. |
+
+Interactive refresh/control subprocess behavior was verified by the user separately
+from the automated fixtures. The historical results below belong to the earlier layout.
+
+### Historical publication checks (before source reorganization)
+
+These are the observed results from publication preparation on 2026-09-11, using
+the former root-level source layout. They do not verify the reorganized layout:
 
 | Environment | Dependencies | Result |
 | --- | --- | --- |
@@ -408,7 +467,7 @@ observed results from publication preparation on 2026-09-11:
 | macOS 26.6.2, isolated checkout with spaces in its path, interactive Herdr checks | Herdr 0.9.0; Lua 5.5.1; Homebrew luv 1.52.1-0; fzf 0.74.3 | User-verified pass: all five qualified actions, current/all-space scoping, previews and Ctrl+P, Escape/Ctrl+C cancellation without focus changes, Enter selection for tabs/spaces/agents, variant switching with preserved origin (including another space highlighted and no matches), and direct current-space tabs/agents entrypoint context. |
 | Linux | Unsupported; not tested | Support deferred to a follow-up with a suitable Linux environment, isolated regressions, the same interactive checks as macOS, recorded versions/outcomes, and setup instructions. |
 
-The isolated copy contained `main.lua`, `open.lua`, `core.lua`, `runtime.lua`,
+That historical isolated copy contained `main.lua`, `open.lua`, `core.lua`, `runtime.lua`,
 `test.lua`, `herdr-plugin.toml`, `LICENSE`, `README.md`, and `lib/`. It was placed
 in `Herdr Pickr/` alongside an empty `caller/` directory under a fresh temporary
 parent, with no parent shared helpers. From `caller/`, the successful command was:

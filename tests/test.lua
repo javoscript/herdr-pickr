@@ -1,8 +1,8 @@
 local uv = require("luv")
 local directory = assert(uv.fs_realpath(arg[0])):match("^(.*)/[^/]+$")
-local lib = directory .. "/lib"
-package.path = directory .. "/?.lua;" .. lib .. "/?.lua;" .. lib .. "/vendor/?.lua;" .. package.path
-local core, runtime, json = require("core"), require("runtime"), require("json")
+local source = assert(directory:match("^(.*)/[^/]+$")) .. "/src"
+package.path = source .. "/?.lua;" .. package.path
+local core, runtime, json = require("pickr.core"), require("pickr.runtime"), require("pickr.vendor.json")
 local original_run_picker = runtime.run_picker
 -- Existing flag/filter fixtures isolate the UI process. Interactive refresh
 -- checks exercise the real asynchronous controller separately.
@@ -43,8 +43,8 @@ do
       called = true
       return {}
     end
-    arg = { [0] = directory .. "/open.lua", entry }
-    dofile(directory .. "/open.lua")
+    arg = { [0] = source .. "/open.lua", entry }
+    dofile(source .. "/open.lua")
     assert(called)
   end
   runtime.herdr, runtime.current_workspace, arg = saved_herdr, saved_workspace, saved_arg

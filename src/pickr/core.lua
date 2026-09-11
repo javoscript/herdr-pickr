@@ -1,4 +1,4 @@
-local runtime = require("runtime")
+local runtime = require("pickr.runtime")
 local M = {}
 
 -- Herdr 0.9.0 status priority, dot glyphs, and Rosé Pine palette colors.

@@ -9,31 +9,31 @@ platforms = ["macos"]
 id = "tabs-current"
 title = "Pickr: tabs in current space"
 contexts = ["global"]
-command = ["lua", "open.lua", "tabs-current"]
+command = ["lua", "src/open.lua", "tabs-current"]
 
 [[actions]]
 id = "tabs-all"
 title = "Pickr: tabs in all spaces"
 contexts = ["global"]
-command = ["lua", "open.lua", "tabs-all"]
+command = ["lua", "src/open.lua", "tabs-all"]
 
 [[actions]]
 id = "spaces"
 title = "Pickr: spaces"
 contexts = ["global"]
-command = ["lua", "open.lua", "spaces"]
+command = ["lua", "src/open.lua", "spaces"]
 
 [[actions]]
 id = "agents-current"
 title = "Pickr: agents in current space"
 contexts = ["global"]
-command = ["lua", "open.lua", "agents-current"]
+command = ["lua", "src/open.lua", "agents-current"]
 
 [[actions]]
 id = "agents-all"
 title = "Pickr: agents in all spaces"
 contexts = ["global"]
-command = ["lua", "open.lua", "agents-all"]
+command = ["lua", "src/open.lua", "agents-all"]
 
 [[panes]]
 id = "tabs-current"
@@ -41,7 +41,7 @@ title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "main.lua", "tabs", "current"]
+command = ["lua", "src/main.lua", "tabs", "current"]
 
 [[panes]]
 id = "tabs-all"
@@ -49,7 +49,7 @@ title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "main.lua", "tabs", "all"]
+command = ["lua", "src/main.lua", "tabs", "all"]
 
 [[panes]]
 id = "spaces"
@@ -57,7 +57,7 @@ title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "main.lua", "workspaces", "all"]
+command = ["lua", "src/main.lua", "workspaces", "all"]
 
 [[panes]]
 id = "agents-current"
@@ -65,7 +65,7 @@ title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "main.lua", "agents", "current"]
+command = ["lua", "src/main.lua", "agents", "current"]
 
 [[panes]]
 id = "agents-all"
@@ -73,4 +73,4 @@ title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "main.lua", "agents", "all"]
+command = ["lua", "src/main.lua", "agents", "all"]

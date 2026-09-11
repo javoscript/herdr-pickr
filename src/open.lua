@@ -1,7 +1,8 @@
-local directory = debug.getinfo(1, "S").source:sub(2):match("^(.*)/") or "."
-local lib = directory .. "/lib"
-package.path = directory .. "/?.lua;" .. lib .. "/?.lua;" .. lib .. "/vendor/?.lua;" .. package.path
-local runtime = require("runtime")
+local uv = require("luv")
+local script = assert(uv.fs_realpath(debug.getinfo(1, "S").source:sub(2)), "Cannot resolve picker script path")
+local directory = assert(script:match("^(.*)/[^/]+$"))
+package.path = directory .. "/?.lua;" .. package.path
+local runtime = require("pickr.runtime")
 
 local ok, message = pcall(function()
   assert(os.getenv("HERDR_ENV") == "1", "Pickr must be launched inside Herdr")
