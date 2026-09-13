@@ -629,6 +629,8 @@ do
     .. '"refresh":["f3","f4"],"toggle_preview":["f5"],"tabs_current":["f6"],'
     .. '"tabs_all":["f7"],"spaces":["f8"],"agents_current":["f9"],"agents_all":["f10"]}}')
   settings.prompt = config.decode(json.encode({ prompt = { variants = prompt_overrides } })).prompt
+  for _, show_hints in ipairs({ true, false }) do
+  settings.popup.show_hints = show_hints
   for _, empty in ipairs({ false, true }) do
     for _, source_variant in ipairs(variants) do
       for _, action in ipairs({ "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all" }) do
@@ -645,7 +647,12 @@ do
           assert(flags["--expect=f6,f7,f8,f9,f10"])
           assert(flags["--bind=f1:accept"] and flags["--bind=alt-v:accept"] and flags["--bind=f2:abort"])
           assert(not flags["--bind=enter:accept"] and not flags["--bind=esc:abort"])
-          assert(footer(0):find("f3/f4: refresh", 1, true))
+          if show_hints then
+            assert(footer(0):find("f3/f4: refresh", 1, true))
+          else
+            assert(footer == nil)
+            for _, option in ipairs(args) do assert(not option:match("^%-%-footer")) end
+          end
           if calls == 1 then return 1, settings.keymap.keys[action][1] .. "\n", "", 0 end
           return 130, "", "", 0
         end
@@ -653,6 +660,7 @@ do
         assert(calls == 2)
       end
     end
+  end
   end
   local disabled = config.decode('{"keys":{"accept":["f1"],"close":["f2"],"refresh":[],"toggle_preview":[], '
     .. '"tabs_current":[],"tabs_all":[],"spaces":[],"agents_current":[],"agents_all":[]}}')
@@ -943,7 +951,7 @@ core.snapshot_candidates = snapshot_candidates
 dofile(directory .. "/themed_rendering.lua")
 dofile(directory .. "/documentation.lua")
 -- Separate Lua processes keep fixture overrides isolated from real PTY checks.
-for _, name in ipairs({ "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua" }) do
+for _, name in ipairs({ "columns.lua", "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua" }) do
   local code, output, errors = require("pickr.process").run(assert(uv.exepath()),
     { directory .. "/" .. name }, nil, runtime.fzf_env(), 120000)
   io.write(output)

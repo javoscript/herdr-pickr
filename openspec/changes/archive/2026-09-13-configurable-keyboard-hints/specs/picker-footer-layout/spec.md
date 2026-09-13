@@ -1,10 +1,4 @@
-# picker-footer-layout Specification
-
-## Purpose
-
-Keep bottom shortcut hints predictable and compact by separating picker actions from variant navigation into stable rows.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Footer hints use action and variant rows
 

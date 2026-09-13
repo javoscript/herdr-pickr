@@ -48,7 +48,8 @@ end
 
 function M.decode(text)
   local config = json.decode(text, true)
-  object(config, "config", { keys = true, theme = true, preview = true, popup = true, prompt = true })
+  object(config, "config", { keys = true, theme = true, preview = true, popup = true, prompt = true, columns = true })
+  local columns = require("pickr.columns").resolve(config.columns)
   local keys, name, custom = {}, nil, {}
   local keymap, themes = require("pickr.keymap"), require("pickr.themes")
   if not omitted(config.keys) then
@@ -85,10 +86,17 @@ function M.decode(text)
       preview.enabled_by_default = config.preview.enabled_by_default
     end
   end
-  local popup = { width = "80%", height = "70%" }
+  local popup = { width = "80%", height = "70%", show_hints = true }
   if not omitted(config.popup) then
-    object(config.popup, "popup", { width = true, height = true })
-    for field, value in pairs(config.popup) do
+    object(config.popup, "popup", { width = true, height = true, show_hints = true })
+    if not omitted(config.popup.show_hints) then
+      if type(config.popup.show_hints) ~= "boolean" then
+        error("popup.show_hints: expected a boolean", 0)
+      end
+      popup.show_hints = config.popup.show_hints
+    end
+    for _, field in ipairs({ "width", "height" }) do
+      local value = config.popup[field]
       if not omitted(value) then
         local percent = type(value) == "string" and value:match("^([1-9]%d*)%%$")
         local valid = percent and tonumber(percent) <= 100
@@ -117,7 +125,7 @@ function M.decode(text)
       or prompt_string(overrides[variant], "prompt.variants." .. variant)
   end
   return { keymap = keymap.resolve(keys), roles = themes.resolve(name, custom),
-    theme_name = name or "catppuccin", preview = preview, popup = popup, prompt = prompt }
+    theme_name = name or "catppuccin", preview = preview, popup = popup, prompt = prompt, columns = columns }
 end
 
 local function read_file(path)
@@ -159,7 +167,7 @@ function M.owner(deps)
   local snapshot = (deps.getenv or os.getenv)("PICKR_SETTINGS_SNAPSHOT")
   if snapshot == nil then return M.load(deps) end
   local ok, result = pcall(function()
-    local handoff = json.decode(snapshot)
+    local handoff = json.decode(snapshot, true)
     assert(type(handoff) == "table" and handoff.version == 1, "unsupported snapshot version")
     local settings = handoff.settings
     assert(type(settings) == "table" and type(settings.keymap) == "table"
@@ -167,6 +175,8 @@ function M.owner(deps)
       and type(settings.roles) == "table" and type(settings.preview) == "table"
       and type(settings.popup) == "table" and type(settings.prompt) == "table"
       and type(settings.prompt.variants) == "table", "invalid settings snapshot")
+    assert(type(settings.popup.show_hints) == "boolean", "popup.show_hints: expected a boolean")
+    settings.columns = require("pickr.columns").resolve(settings.columns, true)
     prompt_string(settings.prompt.default, "prompt.default")
     for variant in pairs(require("pickr.keymap").variants) do
       prompt_string(settings.prompt.variants[variant], "prompt.variants." .. variant)

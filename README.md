@@ -25,7 +25,7 @@
 - 🚦 **Attention first.** Agent statuses put blocked work and unseen completions up front.
 - 👀 **Peek before you jump.** Color terminal snapshots, right in the popup.
 - ⚡ **Keep moving.** Switch views and refresh without leaving the picker.
-- 🎨 **Make it yours.** Remap every action; tune themes, colors, prompts, size, and previews.
+- 🎨 **Make it yours.** Choose and reorder columns; remap actions and tune themes, colors, prompts, size, and previews.
 
 ---
 
@@ -120,6 +120,8 @@ Repeat the installation command to update the plugin.
   <a href="#herdr-keybindings">Keybindings</a> ·
   <a href="#pickr-configuration-file">Configuration file</a> ·
   <a href="#popup-action-keys">Action keys</a> ·
+  <a href="#keyboard-hints">Hints</a> ·
+  <a href="#displayed-columns">Columns</a> ·
   <a href="#popup-size">Popup size</a> ·
   <a href="#initial-preview-visibility">Preview</a> ·
   <a href="#themes-and-custom-colors">Themes</a> ·
@@ -199,7 +201,15 @@ Create `config.json` in that directory. Here is the complete default configurati
   },
   "popup": {
     "width": "80%",
-    "height": "70%"
+    "height": "70%",
+    "show_hints": true
+  },
+  "columns": {
+    "spaces": ["status", "space", "tabs", "directory"],
+    "tabs_current": ["status", "tab", "panes", "directory"],
+    "tabs_all": ["status", "space", "tab", "panes", "directory"],
+    "agents_current": ["status", "tab", "agent", "title", "pane"],
+    "agents_all": ["status", "space", "tab", "agent", "title", "pane"]
   },
   "preview": {
     "enabled_by_default": true
@@ -308,6 +318,65 @@ and acceptance stays disabled until success.
 
 Footer hints show configured aliases and hide disabled actions. Controls occupy
 the first row, view shortcuts the second; long rows clip rather than wrap.
+
+### Keyboard hints
+
+Hide the entire keyboard hints section with:
+
+```json
+{
+  "popup": {
+    "show_hints": false
+  }
+}
+```
+
+`popup.show_hints` defaults to `true`; omitted or null values keep that default.
+Only booleans or null are accepted. Setting it to `false` removes both footer
+rows, their separator, and the empty-list `no entries` prefix, reclaiming that
+space for the list. Keyboard shortcuts still work, and refresh/error messages
+remain visible. The setting applies to all five views and stays fixed through
+switching, refresh, and retry. Close and reopen Pickr to apply edits.
+
+### Displayed columns
+
+Choose the columns shown in each view and their left-to-right order:
+
+```json
+{
+  "columns": {
+    "tabs_all": ["tab", "space", "directory"],
+    "agents_current": ["agent", "status", "title"]
+  }
+}
+```
+
+Each array replaces that view's complete column list. These are the available
+column names, listed in their default order:
+
+| View | Configuration key | Available columns / default order |
+| --- | --- | --- |
+| Spaces | `spaces` | `status`, `space`, `tabs`, `directory` |
+| Tabs here | `tabs_current` | `status`, `tab`, `panes`, `directory` |
+| All tabs | `tabs_all` | `status`, `space`, `tab`, `panes`, `directory` |
+| Agents here | `agents_current` | `status`, `tab`, `agent`, `title`, `pane` |
+| All agents | `agents_all` | `status`, `space`, `tab`, `agent`, `title`, `pane` |
+
+- Omitted or null `columns` or view values keep the corresponding defaults.
+  An empty `columns` object keeps all defaults.
+- Lists must contain at least one column. Names are case-sensitive and must be
+  unique and available in that view. Empty arrays, unknown names/views, wrong
+  types, and null array elements block launch, even for inactive views.
+- **Only visible columns are searchable.** Separate search terms can match
+  different columns; one term cannot span column boundaries.
+- The `status` glyph and text move or hide together. Worktree annotations stay
+  with `space`; pane labels stay with `pane` (headed `pane [label]`). Hiding a
+  column also removes its annotations from display and search.
+- Column choices do not change agent priority, worktree grouping, selection, or
+  preview targets. Even a single-column view remains selectable and previewable.
+
+Switching views uses the destination's configured columns. Refresh and retry keep
+the session's settings; **close and reopen Pickr to apply configuration edits**.
 
 ### Popup size
 

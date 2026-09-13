@@ -1,10 +1,4 @@
-# picker-column-order Specification
-
-## Purpose
-
-Provide consistent column placement across Pickr's five picker variants so users can scan related information predictably when switching views.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Picker columns follow a shared relative order
 

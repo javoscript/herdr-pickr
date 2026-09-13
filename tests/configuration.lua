@@ -156,6 +156,22 @@ deps.read_file = function() return "{}", "close failed" end
 fails(function() config.load(deps) end, "/fixture settings/config.json: close failed")
 print("Configuration: preview and popup defaults, partial overrides, strict validation and read errors OK")
 
+for _, text in ipairs({ '{}', '{"popup":null}', '{"popup":{}}',
+  '{"popup":{"show_hints":null}}', '{"popup":{"show_hints":true}}' }) do
+  equal(config.decode(text).popup.show_hints, true)
+end
+local hidden = config.decode('{"popup":{"show_hints":false,"width":120,"height":"90%"}}')
+equal(hidden.popup.show_hints, false)
+equal(hidden.popup.width, 120)
+equal(hidden.popup.height, "90%")
+deps.read_file = function() return nil, "missing", "ENOENT" end
+equal(config.load(deps).popup.show_hints, true)
+for _, value in ipairs({ '0', '1', '"false"', '[]', '{}' }) do
+  deps.read_file = function() return '{"popup":{"show_hints":' .. value .. '}}' end
+  fails(function() config.load(deps) end, "/fixture settings/config.json: popup.show_hints")
+end
+print("Configuration: hint visibility defaults, false, strict types and independent dimensions OK")
+
 for _, text in ipairs({ '{}', '{"prompt":null}', '{"prompt":{}}',
   '{"prompt":{"default":null,"variants":null}}' }) do
   local settings = config.decode(text)
@@ -207,7 +223,7 @@ for _, fixture in ipairs(invalid_prompts) do
 end
 print("Configuration: prompt inheritance, five variants, literal/empty strings and field/path diagnostics OK")
 
-local contents = '{"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120},'
+local contents = '{"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120,"show_hints":false},'
   .. '"prompt":{"default":"Original: ","variants":{"spaces":"","agents_all":"Agents: "}}}'
 local loads = 0
 local launch_deps = { getenv = function(key) return env[key] end,
@@ -222,6 +238,7 @@ end, read_file = function() error("Owner must not reread launcher settings") end
 equal(loads, 1)
 equal(owner.theme_name, "terminal")
 equal(owner.popup.width, 120)
+equal(owner.popup.show_hints, false)
 equal(#owner.keymap.keys.refresh, 0)
 equal(owner.roles.background.kind, "default")
 equal(owner.prompt.default, "Original: ")
@@ -230,12 +247,15 @@ for variant in pairs(keymap.variants) do
 end
 local reopened = config.owner(launch_deps)
 equal(reopened.theme_name, "rose-pine")
+equal(reopened.popup.show_hints, true)
 equal(reopened.prompt.default, "Edited: ")
 equal(reopened.prompt.variants.tabs_current, "Edited: ")
 equal(reopened.prompt.variants.spaces, "Spaces: ")
 equal(reopened.prompt.variants.agents_all, "New agents: ")
 equal(loads, 2)
 local mutations = {
+  function(s) s.popup.show_hints = nil end,
+  function(s) s.popup.show_hints = "false" end,
   function(s) s.prompt = nil end,
   function(s) s.prompt.default = nil end,
   function(s) s.prompt.variants = nil end,

@@ -14,4 +14,10 @@ end
 for action in pairs(require("pickr.fzf_bindings").actions) do
   assert(readme:find("`" .. action .. "`", 1, true), "undocumented imported action: " .. action)
 end
+for variant, columns in pairs(require("pickr.columns").defaults) do
+  assert(readme:find("`" .. variant .. "`", 1, true), "undocumented column variant: " .. variant)
+  for _, column in ipairs(columns) do
+    assert(readme:find("`" .. column .. "`", 1, true), "undocumented column: " .. column)
+  end
+end
 print("Documentation: JSON examples validate; every action, theme, role and supported imported action is documented")

@@ -22,7 +22,7 @@ Pickr SHALL read an optional `config.json` from its Herdr-managed plugin configu
 
 ### Requirement: Partial configuration preserves defaults and validates overrides
 
-Configuration SHALL be a JSON object with optional `keys`, `theme`, `preview`, `popup`, and `prompt` objects. Omitted or null settings SHALL retain their defaults, with omitted or null variant prompts inheriting the resolved global prompt. Missing files SHALL silently use defaults. Unreadable discovered files, malformed JSON, wrong types, unknown settings, invalid keymaps, invalid theme settings, and invalid prompt settings SHALL produce an actionable diagnostic identifying the location or setting and prevent opening a misconfigured picker. Directory-discovery failure SHALL produce an actionable diagnostic rather than reading an assumed path.
+Configuration SHALL be a JSON object with optional `keys`, `theme`, `preview`, `popup`, `prompt`, and `columns` objects. Omitted or null settings SHALL retain their defaults, with omitted or null variant prompts inheriting the resolved global prompt and omitted or null variant column lists retaining that variant's default columns. Missing files SHALL silently use defaults. Unreadable discovered files, malformed JSON, wrong types, unknown settings, invalid keymaps, invalid theme settings, invalid prompt settings, and invalid column settings SHALL produce an actionable diagnostic identifying the location or setting and prevent opening a misconfigured picker. Directory-discovery failure SHALL produce an actionable diagnostic rather than reading an assumed path.
 
 #### Scenario: Minimal override
 - **WHEN** configuration changes only the refresh action
@@ -36,7 +36,7 @@ Configuration SHALL be a JSON object with optional `keys`, `theme`, `preview`, `
 #### Scenario: No configuration file
 - **WHEN** the resolved config directory has no `config.json`
 - **THEN** Pickr opens with its default actions and Catppuccin theme without creating a file
-- **AND** every variant uses the prompt `"Search: "`
+- **AND** every variant uses the prompt `"Search: "` and all its existing columns in their default order
 
 #### Scenario: Null retains defaults rather than disabling a shortcut
 - **WHEN** `keys.refresh` is `null` and `theme.name` is `null`
@@ -184,3 +184,90 @@ All launch paths SHALL use prompts from the same resolved launch settings as oth
 - **WHEN** the configuration is edited after launch settings resolve
 - **THEN** initial picker startup, switches, and refreshes in that session use the original prompt settings
 - **AND** closing and reopening adopts the edited global prompt and variant overrides
+
+### Requirement: Popup keyboard hint visibility is configurable
+
+Pickr SHALL expose `popup.show_hints` as a boolean defaulting to `true` when omitted or null, including when `popup` is omitted or null or the configuration file is missing. A value of `false` SHALL hide the entire keyboard hints footer in all five picker variants. Nonboolean non-null values SHALL block launch with a file/field diagnostic. Existing popup dimension defaults and validation SHALL remain unchanged.
+
+All launch paths SHALL use the resolved hint visibility from the same launch settings snapshot as other configuration. Switching variants, refresh loading, success, failure, and retry SHALL retain that visibility. Configuration edits SHALL take effect on the next launch, including edits made between launcher resolution and picker startup. Hiding hints SHALL NOT disable or remap keyboard actions.
+
+#### Scenario: Default and explicit visible hints
+- **WHEN** `popup.show_hints` is `true`, omitted, or null, or `popup` is omitted or null, or the configuration file is missing
+- **THEN** each picker variant displays its normal grouped footer
+- **AND** popup dimensions retain their independently resolved values
+
+#### Scenario: Hidden hints across launch paths
+- **WHEN** `popup.show_hints` is `false` and Pickr opens through an action, a direct Herdr pane launch, or direct picker invocation
+- **THEN** the initial variant has no hints section
+- **AND** configured keyboard shortcuts retain their normal behavior
+
+#### Scenario: Visibility is stable until reopening
+- **WHEN** hint visibility configuration is edited after launch settings resolve
+- **THEN** picker startup, switches, refresh loading, success, failure, and retry use the original visibility
+- **AND** closing and reopening Pickr adopts the edited value
+
+#### Scenario: Invalid hint visibility
+- **WHEN** `popup.show_hints` contains a number, string, array, or object
+- **THEN** Pickr identifies `popup.show_hints` in a configuration diagnostic before popup creation for action launches or before fzf starts for direct launches
+- **AND** no entity is focused
+
+### Requirement: Column lists are configurable independently per variant
+
+Pickr SHALL accept a `columns` object keyed by `spaces`, `tabs_current`, `tabs_all`, `agents_current`, and `agents_all`. Each non-null variant value SHALL be a nonempty JSON array of unique, case-sensitive column-name strings. Each array SHALL replace its variant's complete default list, with array order defining display order. Omitting or setting `columns` or a variant value to null SHALL retain the corresponding defaults; an empty `columns` object SHALL retain all defaults.
+
+The allowed column names and default order SHALL be:
+
+| Variant | Allowed names in default order |
+| --- | --- |
+| `spaces` | `status`, `space`, `tabs`, `directory` |
+| `tabs_current` | `status`, `tab`, `panes`, `directory` |
+| `tabs_all` | `status`, `space`, `tab`, `panes`, `directory` |
+| `agents_current` | `status`, `tab`, `agent`, `title`, `pane` |
+| `agents_all` | `status`, `space`, `tab`, `agent`, `title`, `pane` |
+
+Unknown variants, unavailable or unknown column names, duplicate names, empty arrays, wrong container types, and non-string array elements including null SHALL block launch with a file/field diagnostic, including invalid values for inactive variants. Action launches SHALL validate before popup creation; direct launches SHALL validate before fzf starts.
+
+#### Scenario: Partial column override
+- **WHEN** `columns.tabs_all` is `["tab", "space", "directory"]` and other variants are omitted or null
+- **THEN** all-spaces tabs uses exactly that order and subset
+- **AND** every other variant retains its own default list
+
+#### Scenario: Default containers
+- **WHEN** `columns` is omitted, null, or an empty object
+- **THEN** all five variants retain every existing column in its default order
+
+#### Scenario: Empty and duplicate arrays
+- **WHEN** a column list is `[]` or `["status", "status"]`
+- **THEN** launch is blocked with a diagnostic identifying the invalid column setting
+
+#### Scenario: Invalid variant or unavailable name
+- **WHEN** configuration contains `columns.tabs_here`, uses `space` in `tabs_current`, uses `directory` in an agent variant, or uses a misspelled or differently cased column name
+- **THEN** launch is blocked with a diagnostic identifying the offending setting or element
+
+#### Scenario: Invalid types
+- **WHEN** `columns` is an array, a variant value is an object or string, or an array contains a number, boolean, object, array, or null
+- **THEN** launch is blocked with a diagnostic identifying the offending setting or element
+
+#### Scenario: Invalid inactive variant
+- **WHEN** a spaces launch has valid spaces columns but an invalid `agents_all` column list
+- **THEN** launch is blocked before popup creation for action launches or before fzf starts for direct launches
+- **AND** no entity is focused
+
+### Requirement: Column selection follows the launch configuration and active variant
+
+All launch paths SHALL use column lists from the same resolved launch settings as other configuration. Switching variants SHALL select the destination's effective list from those settings, including empty candidate and zero-match states. Initial rendering, refresh success, and retry success SHALL keep headers, rows, and searchable fields consistent with the active variant's list. Refresh loading, failure, and retry SHALL NOT resolve configuration again. Edits to column settings SHALL take effect only on a subsequent launch, including edits made between launcher resolution and picker startup. Existing query reset on switching and query preservation on refresh SHALL remain unchanged.
+
+#### Scenario: Switch selects destination columns
+- **WHEN** a session switches between variants with different column lists
+- **THEN** each destination uses its configured header, row order, and searchable subset and resets the query as before
+- **AND** its configured header remains present with no candidates or no search matches
+
+#### Scenario: Refresh and retry retain columns
+- **WHEN** a variant refreshes through loading, success, failure, and retry
+- **THEN** refreshed headers, rows, and searchable fields use the original session's column list
+- **AND** its query remains preserved
+
+#### Scenario: Reopen adopts edited columns
+- **WHEN** column settings are edited after launcher resolution or while a picker is open
+- **THEN** picker startup, switches, refreshes, and retries use the original resolved lists
+- **AND** closing and reopening adopts the edited lists

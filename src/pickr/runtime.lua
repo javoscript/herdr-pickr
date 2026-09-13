@@ -227,7 +227,8 @@ function M.run_picker(command, args, input, env, session, render, footer)
     elseif request.event == "ready" and pending then
       session:publish(pending.generation, pending.rows, pending.header)
       pending, loaded = nil, false
-      return gate("rebind", { "accept", "refresh" }) .. "+change-header()+change-footer:" .. footer(#session.rows)
+      return gate("rebind", { "accept", "refresh" }) .. "+change-header()"
+        .. (footer and "+change-footer:" .. footer(#session.rows) or "")
     end
     return ""
   end

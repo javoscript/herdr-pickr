@@ -1,5 +1,6 @@
 local runtime = require("pickr.runtime")
 local themes = require("pickr.themes")
+local columns = require("pickr.columns")
 local default_roles = themes.resolve()
 local M = {}
 
@@ -106,15 +107,16 @@ function M.aligned_rows(entries, header, roles)
 					text = annotation .. "└─ \27[0m" .. text:sub(#"└─ " + 1)
 				end
 			end
+			-- The glyph occupies the same two cells in every row, including the header.
+			if entry.indicator and i == (entry.indicator_field or 2) then
+				text = entry.indicator .. " " .. text
+			end
 			fields[#fields + 1] = text .. (i < #entry and string.rep(" ", widths[i] - utf8.len(entry[i])) or "")
 		end
-		-- Add trusted styling after cleaning and measuring metadata columns.
-		local prefix = entry.indicator and entry.indicator .. " " or ""
 		rows[#rows + 1] = entry[1]
 			.. "\t"
 			.. (entry.preview_pane or "-")
 			.. "\t"
-			.. prefix
 			.. table.concat(fields, "  ·  ")
 	end
 	if header then
@@ -125,29 +127,34 @@ function M.aligned_rows(entries, header, roles)
 end
 
 local function column_header(kind, scope)
-	local header = { "@header", "status", indicator = " " }
-	if kind == "workspaces" then
-		header[#header + 1] = "space"
-		header[#header + 1] = "tabs"
-		header[#header + 1] = "directory"
-	elseif kind == "tabs" then
-		if scope == "all" then
-			header[#header + 1] = "space"
-		end
-		header[#header + 1] = "tab"
-		header[#header + 1] = "panes"
-		header[#header + 1] = "directory"
-	else
-		if scope == "all" then
-			header[#header + 1] = "space"
-		end
-		header[#header + 1] = "tab"
-		header[#header + 1] = "agent"
-		header[#header + 1] = "title"
-		header[#header + 1] = "pane [label]"
-		header.muted_suffixes = { [#header] = "[label]" }
+	local header = { "@header", indicator = " ", muted_suffixes = {} }
+	for _, name in ipairs(columns.layout(kind, scope)) do
+		header[#header + 1] = name == "pane" and "pane [label]" or name
+		if name == "pane" then header.muted_suffixes[#header] = "[label]" end
 	end
 	return header
+end
+
+-- Project the existing canonical entries before measuring or styling them.
+-- IDs remain outside the projection; annotation indexes travel with values.
+local function render_columns(entries, kind, scope, settings, roles)
+	local indexes = {}
+	for index, name in ipairs(columns.layout(kind, scope)) do indexes[name] = index + 1 end
+	local layout = columns.layout(kind, scope, settings)
+	local function project(entry)
+		local result = { entry[1], preview_pane = entry.preview_pane, muted_suffixes = {} }
+		for index, name in ipairs(layout) do
+			local source, target = indexes[name], index + 1
+			result[target] = entry[source]
+			result.muted_suffixes[target] = entry.muted_suffixes and entry.muted_suffixes[source]
+			if source == entry.parent_field then result.parent_field = target end
+			if name == "status" then result.indicator, result.indicator_field = entry.indicator, target end
+		end
+		return result
+	end
+	local projected = {}
+	for index, entry in ipairs(entries) do projected[index] = project(entry) end
+	return M.aligned_rows(projected, project(column_header(kind, scope)), roles)
 end
 
 local function grouped_workspaces(workspaces)
@@ -241,7 +248,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings)
 			entry.preview_pane = targets[workspace.active_tab_id]
 			entries[#entries + 1] = entry
 		end
-		return M.aligned_rows(entries, column_header(kind, scope), roles)
+		return render_columns(entries, kind, scope, settings, roles)
 	end
 
 	local tabs = {}
@@ -280,7 +287,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings)
 			entry[#entry + 1] = directory_label(directories[tab.tab_id])
 			entries[#entries + 1] = entry
 		end
-		return M.aligned_rows(entries, column_header(kind, scope), roles)
+		return render_columns(entries, kind, scope, settings, roles)
 	end
 
 	local pane_labels = {}
@@ -333,7 +340,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings)
 		end
 		entries[#entries + 1] = entry
 	end
-	return M.aligned_rows(entries, column_header(kind, scope), roles)
+	return render_columns(entries, kind, scope, settings, roles)
 end
 
 function M.preview(pane_id)
@@ -417,12 +424,13 @@ local function pick_once(kind, scope, settings, popup)
 	session.popup = popup
 	local expect = keymap.expect(settings.keymap)
 	session.has_expect = #expect > 0
-	local function footer(count)
-		return keymap.footer(settings.keymap, count)
+	local footer
+	if settings.popup.show_hints then
+		footer = function(count) return keymap.footer(settings.keymap, count) end
 	end
 	local search_fields = {}
-	for i = 2, #column_header(kind, scope) do
-		search_fields[#search_fields + 1] = tostring(i - 1)
+	for i = 1, #columns.layout(kind, scope, settings) do
+		search_fields[#search_fields + 1] = tostring(i)
 	end
 	local title = kind == "workspaces" and "Spaces"
 		or (kind:gsub("^%l", string.upper) .. " — " .. scope .. " space" .. (scope == "all" and "s" or ""))
@@ -450,8 +458,8 @@ local function pick_once(kind, scope, settings, popup)
 		"--preview-window=right:50%:border-left:nowrap" .. (popup.preview_visible and "" or ":hidden"),
 		themes.options(settings.roles),
 		"--border-label=" .. title,
-		"--footer=" .. footer(#rows),
 	}
+	if footer then args[#args + 1] = "--footer=" .. footer(#rows) end
 	if session.has_expect then args[#args + 1] = "--expect=" .. table.concat(expect, ",") end
 	for _, key in ipairs({ "enter", "esc", "ctrl-c", "ctrl-g", "ctrl-q", "ctrl-z", "double-click" }) do
 		args[#args + 1] = "--bind=" .. key .. ":ignore"
