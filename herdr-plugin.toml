@@ -2,7 +2,7 @@ id = "javoscript.herdr-pickr"
 name = "Herdr Pickr"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
-description = "Fuzzy tab, space, and agent pickers with terminal previews."
+description = "Fuzzy tab, space, agent, and pane pickers with terminal previews."
 platforms = ["macos", "linux"]
 
 [[actions]]
@@ -34,6 +34,24 @@ id = "agents-all"
 title = "Pickr: agents in all spaces"
 contexts = ["global"]
 command = ["lua", "src/open.lua", "agents-all"]
+
+[[actions]]
+id = "panes-tab"
+title = "Panes in this tab"
+contexts = ["global"]
+command = ["lua", "src/open.lua", "panes-tab"]
+
+[[actions]]
+id = "panes-current"
+title = "Panes in this space"
+contexts = ["global"]
+command = ["lua", "src/open.lua", "panes-current"]
+
+[[actions]]
+id = "panes-all"
+title = "Panes in all spaces"
+contexts = ["global"]
+command = ["lua", "src/open.lua", "panes-all"]
 
 [[panes]]
 id = "tabs-current"
@@ -74,3 +92,27 @@ placement = "popup"
 width = "80%"
 height = "70%"
 command = ["lua", "src/main.lua", "agents", "all"]
+
+[[panes]]
+id = "panes-tab"
+title = "Panes in this tab"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["lua", "src/main.lua", "panes", "tab"]
+
+[[panes]]
+id = "panes-current"
+title = "Panes in this space"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["lua", "src/main.lua", "panes", "current"]
+
+[[panes]]
+id = "panes-all"
+title = "Panes in all spaces"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["lua", "src/main.lua", "panes", "all"]

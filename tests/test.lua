@@ -3,8 +3,10 @@ local directory = assert(uv.fs_realpath(arg[0])):match("^(.*)/[^/]+$")
 local source = assert(directory:match("^(.*)/[^/]+$")) .. "/src"
 package.path = source .. "/?.lua;" .. package.path
 dofile(directory .. "/configuration.lua")
+dofile(directory .. "/footer.lua")
 dofile(directory .. "/fzf_bindings.lua")
 local core, runtime, json = require("pickr.core"), require("pickr.runtime"), require("pickr.vendor.json")
+dofile(directory .. "/origin.lua")
 local original_run_picker = runtime.run_picker
 local config = require("pickr.config")
 local original_owner, original_load = config.owner, config.load
@@ -12,8 +14,8 @@ local original_owner, original_load = config.owner, config.load
 config.owner = function() return config.decode('{"theme":{"name":"rose-pine"}}') end
 config.load = config.owner
 local snapshot_candidates = core.snapshot_candidates
-core.snapshot_candidates = function(snapshot, kind, scope, current, settings)
-  return snapshot_candidates(snapshot, kind, scope, current, settings or config.decode('{"theme":{"name":"rose-pine"}}'))
+core.snapshot_candidates = function(snapshot, kind, scope, current, settings, tab)
+  return snapshot_candidates(snapshot, kind, scope, current, settings or config.decode('{"theme":{"name":"rose-pine"}}'), tab)
 end
 do
   local config = require("pickr.config")
@@ -56,11 +58,18 @@ end
 -- Existing flag/filter fixtures isolate the UI process. Interactive refresh
 -- checks exercise the real asynchronous controller separately.
 runtime.run_picker = function(command, args, input, env, session)
+  -- Rendering fixtures below use line-oriented filter output. Adapt their
+  -- synthetic exits to the owned interactive protocol at this boundary.
+  local flags = {}; for _, option in ipairs(args) do flags[option] = true end
+  assert(flags["--print-query"] and flags["--print0"])
+  for i = #args, 1, -1 do
+    if args[i] == "--print-query" or args[i] == "--print0" then table.remove(args, i) end
+  end
   local code, output, errors, signal = runtime.run(command, args, input, env)
-  local selected = output:match("^\n(.*)$")
-  local target = selected and session:accept(selected:gsub("\n+$", ""))
+  local result = runtime.picker_result(output:find("\0", 1, true) and output
+    or "\0" .. output:gsub("\n", "\0"), session)
   session:close()
-  return code, output, errors, signal, target
+  return code, result, errors, signal
 end
 
 -- Action context wins over inherited caller state; the captured origin wins
@@ -80,13 +89,16 @@ assert(runtime.current_workspace(getenv) == "inherited-space")
 
 do
   local saved_open, saved_workspace, saved_arg = runtime.open_popup, runtime.current_workspace, arg
+  local saved_origin = runtime.origin
   local saved_env = os.getenv("HERDR_ENV")
   uv.os_setenv("HERDR_ENV", "1")
   runtime.current_workspace = function() return "original-space" end
-  for _, entry in ipairs({ "tabs-current", "tabs-all", "spaces", "agents-current", "agents-all" }) do
+  runtime.origin = function() return { workspace_id = "original-space", tab_id = "original-tab" } end
+  for _, entry in ipairs({ "tabs-current", "tabs-all", "spaces", "agents-current", "agents-all", "panes-tab", "panes-current", "panes-all" }) do
     local called = false
-    runtime.open_popup = function(entrypoint, workspace, launch_settings)
+    runtime.open_popup = function(entrypoint, workspace, launch_settings, tab)
       assert(entrypoint == entry and workspace == "original-space")
+      assert(tab == "original-tab")
       local snapshot = config.snapshot(launch_settings)
       local settings = original_owner({ getenv = function(key)
         assert(key == "PICKR_SETTINGS_SNAPSHOT"); return snapshot
@@ -100,6 +112,7 @@ do
     assert(called)
   end
   runtime.open_popup, runtime.current_workspace, arg = saved_open, saved_workspace, saved_arg
+  runtime.origin = saved_origin
   if saved_env then uv.os_setenv("HERDR_ENV", saved_env) else uv.os_unsetenv("HERDR_ENV") end
 end
 
@@ -112,7 +125,7 @@ local function equal(actual, expected)
     json.encode(actual) .. " ~= " .. json.encode(expected))
 end
 
-local original_herdr, original_run, original_focus = runtime.herdr, runtime.run, runtime.focus_agent_pane
+local original_herdr, original_run, original_focus = runtime.herdr, runtime.run, runtime.focus_pane
 local original_current = os.getenv("HERDR_ACTIVE_WORKSPACE_ID")
 uv.os_setenv("HERDR_ACTIVE_WORKSPACE_ID", "w1")
 local workspaces = {
@@ -126,15 +139,15 @@ local tabs = {
 }
 local home = assert(os.getenv("HOME"))
 local panes = {
-  { pane_id = "w1:p1", cwd = "/wrong-first-pane", label = "review-é\nqueue\t[one]" },
-  { pane_id = "w1:p2", cwd = "/shell", foreground_cwd = home .. "/Projects/é", focused = false },
-  { pane_id = "w1:p3", cwd = "/active-tab", foreground_cwd = "" },
-  { pane_id = "w2:p1" },
+  { pane_id = "w1:p1", workspace_id = "w1", tab_id = "w1:t1", cwd = "/wrong-first-pane", label = "review-é\nqueue\t[one]" },
+  { pane_id = "w1:p2", workspace_id = "w1", tab_id = "w1:t1", cwd = "/shell", foreground_cwd = home .. "/Projects/é", focused = false },
+  { pane_id = "w1:p3", workspace_id = "w1", tab_id = "w1:t2", cwd = "/active-tab", foreground_cwd = "" },
+  { pane_id = "w2:p1", workspace_id = "w2", tab_id = "w2:t1" },
 }
 local layouts = {
-  { tab_id = "w1:t1", focused_pane_id = "w1:p2" },
-  { tab_id = "w1:t2", focused_pane_id = "w1:p3" },
-  { tab_id = "w2:t1", focused_pane_id = "w2:p1" },
+  { workspace_id = "w1", tab_id = "w1:t1", focused_pane_id = "w1:p2", panes = { { pane_id = "w1:p1" }, { pane_id = "w1:p2" } } },
+  { workspace_id = "w1", tab_id = "w1:t2", focused_pane_id = "w1:p3", panes = { { pane_id = "w1:p3" } } },
+  { workspace_id = "w2", tab_id = "w2:t1", focused_pane_id = "w2:p1", panes = { { pane_id = "w2:p1" } } },
 }
 local agents = json.decode([[ [
   {"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","agent":"opencode","agent_status":"working","terminal_title":"title"},
@@ -148,7 +161,7 @@ runtime.herdr = function(kind, action, flag, id)
   return { snapshot = { workspaces = workspaces, tabs = tabs, agents = agents,
     panes = panes, layouts = layouts } }
 end
-runtime.focus_agent_pane = function(id) focus_calls[#focus_calls + 1] = { "pane", id } end
+runtime.focus_pane = function(id) focus_calls[#focus_calls + 1] = { "pane", id } end
 
 for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
     { "workspaces", "all" }, { "agents", "current" }, { "agents", "all" } }) do
@@ -197,7 +210,7 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
       assert((flags["--no-sort"] == true) == (mode[1] ~= "tabs" or mode[2] == "all"))
       assert(flags["--ansi"])
       assert(flags["--header-lines=1"])
-      assert(flags["--expect=ctrl-r,ctrl-t,ctrl-s,ctrl-a,ctrl-g"])
+      assert(flags["--expect=ctrl-r,ctrl-t,ctrl-s,ctrl-a,ctrl-g,alt-1,alt-2,alt-3"])
       assert(flags["--with-nth=3.."])
       assert(flags["--preview-window=right:50%:border-left:nowrap"])
       assert(flags["--preview=" .. runtime.preview_command()])
@@ -529,22 +542,23 @@ core.pick("agents", "all")
 equal(focus_calls, { { "pane", "w2:p6" } })
 print("Agents: priority, recency, stable ties, status dots and fixed fuzzy-filter order OK")
 
--- All 25 source/destination pairs must stay in the popup until an actual
+-- All 64 source/destination pairs must stay in the popup until an actual
 -- selection, with fresh rows and the destination's scope/sort/preview options.
 local variants = {
   { "ctrl-r", "tabs", "current" }, { "ctrl-t", "tabs", "all" },
   { "ctrl-s", "workspaces", "all" }, { "ctrl-a", "agents", "current" },
   { "ctrl-g", "agents", "all" },
+  { "alt-1", "panes", "tab" }, { "alt-2", "panes", "current" }, { "alt-3", "panes", "all" },
 }
 local prompt_overrides = { tabs_current = "Tabs: ", tabs_all = "All tabs: ", spaces = "",
-  agents_current = "Agents: ", agents_all = "  ◉ ' $(touch nope); +change-prompt(x) " }
+  agents_current = "Agents: ", agents_all = "  ◉ ' $(touch nope); +change-prompt(x) ",
+  panes_tab = "Splits: ", panes_current = "Project: ", panes_all = "Panes: " }
 local function variant_name(variant)
   return variant[2] == "workspaces" and "spaces" or variant[2] .. "_" .. variant[3]
 end
 local function assert_prompt(args, expected)
   local count = 0
   for _, option in ipairs(args) do
-    assert(not option:match("^%-%-query")) -- Switching starts a fresh query.
     if option:match("^%-%-prompt=") then
       equal(option, "--prompt=" .. expected)
       count = count + 1
@@ -562,7 +576,7 @@ do
       runtime.run_picker = function(_, args, _, _, session)
         assert(session.settings == settings)
         assert_prompt(args, settings.prompt.variants[variant_name(variant)])
-        return 130, "", "", 0
+        return 130, {}, "", 0
       end
       core.pick(variant[2], variant[3], settings)
     end
@@ -585,12 +599,17 @@ for _, source in ipairs(variants) do
     focus_calls = {}
     runtime.run = function(_, args, input)
       runs = runs + 1
-      if runs == 1 then return 0, destination[1] .. "\n" .. plain(input:match("^[^\n]+\n([^\n]+)")) .. "\n", "", 0 end
+      if runs == 1 then return 0, "route query\0" .. destination[1] .. "\0"
+        .. plain(input:match("^[^\n]+\n([^\n]+)")) .. "\0", "", 0 end
       assert(runs == 2)
       equal(focus_calls, {})
       equal(input, target_header .. "\n" .. table.concat(target_rows, "\n"))
       local flags = {}
       for _, flag in ipairs(args) do flags[flag] = true end
+      assert((flags["--query=route query"] == true) == (source == destination))
+      if source ~= destination then
+        for _, flag in ipairs(args) do assert(not flag:match("^%-%-query=")) end
+      end
       assert((flags["--no-sort"] == true) == (destination[2] ~= "tabs" or destination[3] == "all"))
       assert(flags["--preview=" .. runtime.preview_command()])
       return 0, "\n" .. plain(target_rows[1]) .. "\n", "", 0
@@ -599,7 +618,7 @@ for _, source in ipairs(variants) do
     assert(resolved == 1)
     config.owner, runtime.run_picker = saved_owner, saved_picker
     assert(runs == 2)
-    equal(focus_calls, { { destination[2] == "agents" and "pane" or
+    equal(focus_calls, { { (destination[2] == "agents" or destination[2] == "panes") and "pane" or
       (destination[2] == "tabs" and "tab" or "workspace"), ids(target_rows)[1] } })
   end
 end
@@ -620,20 +639,21 @@ end
 core.pick("agents", "current")
 equal(focus_calls, {})
 agents = saved_agents
-print("Picker switching: all 25 routes, empty results, cancellation and destination options OK")
+print("Picker switching: all 64 routes, empty results, cancellation and destination options OK")
 
 do
   local saved_picker, saved_candidates = runtime.run_picker, core.candidates
   local keymap = require("pickr.keymap")
   local settings = config.decode('{"keys":{"accept":["f1","alt-v"],"close":["f2"],'
     .. '"refresh":["f3","f4"],"toggle_preview":["f5"],"tabs_current":["f6"],'
-    .. '"tabs_all":["f7"],"spaces":["f8"],"agents_current":["f9"],"agents_all":["f10"]}}')
+    .. '"tabs_all":["f7"],"spaces":["f8"],"agents_current":["f9"],"agents_all":["f10"],'
+    .. '"panes_tab":["f11"],"panes_current":["f12"],"panes_all":["alt-4"]}}')
   settings.prompt = config.decode(json.encode({ prompt = { variants = prompt_overrides } })).prompt
   for _, show_hints in ipairs({ true, false }) do
   settings.popup.show_hints = show_hints
   for _, empty in ipairs({ false, true }) do
     for _, source_variant in ipairs(variants) do
-      for _, action in ipairs({ "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all" }) do
+      for _, action in ipairs({ "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }) do
         local calls = 0
         core.candidates = function(kind, scope)
           calls = calls + 1
@@ -644,7 +664,7 @@ do
           assert(session.settings == settings)
           assert_prompt(args, prompt_overrides[calls == 1 and variant_name(source_variant) or action])
           local flags = {}; for _, option in ipairs(args) do flags[option] = true end
-          assert(flags["--expect=f6,f7,f8,f9,f10"])
+          assert(flags["--expect=f6,f7,f8,f9,f10,f11,f12,alt-4"])
           assert(flags["--bind=f1:accept"] and flags["--bind=alt-v:accept"] and flags["--bind=f2:abort"])
           assert(not flags["--bind=enter:accept"] and not flags["--bind=esc:abort"])
           if show_hints then
@@ -653,8 +673,10 @@ do
             assert(footer == nil)
             for _, option in ipairs(args) do assert(not option:match("^%-%-footer")) end
           end
-          if calls == 1 then return 1, settings.keymap.keys[action][1] .. "\n", "", 0 end
-          return 130, "", "", 0
+          if calls == 1 then return 1, { query = "no matches", key = settings.keymap.keys[action][1] }, "", 0 end
+          assert((flags["--query=no matches"] == true) == (variant_name(source_variant) == action))
+          assert(session.entry_id == nil)
+          return 130, {}, "", 0
         end
         core.pick(source_variant[2], source_variant[3], settings)
         assert(calls == 2)
@@ -663,13 +685,13 @@ do
   end
   end
   local disabled = config.decode('{"keys":{"accept":["f1"],"close":["f2"],"refresh":[],"toggle_preview":[], '
-    .. '"tabs_current":[],"tabs_all":[],"spaces":[],"agents_current":[],"agents_all":[]}}')
+    .. '"tabs_current":[],"tabs_all":[],"spaces":[],"agents_current":[],"agents_all":[],"panes_tab":[],"panes_current":[],"panes_all":[]}}')
   core.candidates = function() return { "id\tpreview\tlabel" }, "@header\t-\theader" end
   runtime.run_picker = function(_, args, _, _, session, _, footer)
     assert(not session.has_expect)
     for _, option in ipairs(args) do assert(not option:match("^%-%-expect=")) end
     assert(footer(1) == "f1: switch · f2: close")
-    return 130, "", "", 0
+    return 130, {}, "", 0
   end
   for _, variant in ipairs(variants) do core.pick(variant[2], variant[3], disabled) end
   equal(keymap.gate(settings.keymap, "unbind", { "accept", "refresh" }),
@@ -677,7 +699,7 @@ do
   equal(keymap.gate(disabled.keymap, "rebind", { "refresh", "toggle_preview", "tabs_all" }), "")
   runtime.run_picker, core.candidates = saved_picker, saved_candidates
 end
-print("Configured actions: remapped 25 routes with empty/zero-match results, aliases, disabled hints and refresh gates OK")
+print("Configured actions: remapped 64 routes with empty/zero-match results, aliases, disabled hints and refresh gates OK")
 
 do
   local saved_picker = runtime.run_picker
@@ -706,9 +728,9 @@ do
           session:close()
           if calls == 1 then
             session.popup.preview_visible = not session.popup.preview_visible
-            return 1, destination[1] .. "\n", "", 0
+            return 1, { query = "", key = destination[1] }, "", 0
           end
-          return 130, "", "", 0
+          return 130, {}, "", 0
         end
         core.pick(source_variant[2], source_variant[3], settings)
         assert(calls == 2)
@@ -721,14 +743,14 @@ do
       if option:match("^%-%-footer=") then assert(not option:find(": preview", 1, true)) end
     end
     session:close()
-    return 130, "", "", 0
+    return 130, {}, "", 0
   end
   for _, variant in ipairs(variants) do
     core.pick(variant[2], variant[3], config.decode('{"keys":{"toggle_preview":[]}}'))
   end
   runtime.run_picker = saved_picker
 end
-print("Preview settings: both initial states across all 25 routes, replacement aliases and disabled hints OK")
+print("Preview settings: both initial states across all 64 routes, replacement aliases and disabled hints OK")
 
 -- Preview reads the visible ANSI screen only, and reports failures without
 -- invoking focus or waiting for keyboard input in the preview subprocess.
@@ -758,7 +780,7 @@ runtime.herdr = function() return { pane = {} } end
 runtime.run = function() return 1, "", "pane disappeared after get", 0 end
 assert(core.preview("w1:p2"):match("^Preview unavailable:"))
 print("Preview: target mapping, visible ANSI content, full path, empty and closed panes OK")
-runtime.herdr, runtime.run, runtime.focus_agent_pane = original_herdr, original_run, original_focus
+runtime.herdr, runtime.run, runtime.focus_pane = original_herdr, original_run, original_focus
 if original_current then uv.os_setenv("HERDR_ACTIVE_WORKSPACE_ID", original_current)
 else uv.os_unsetenv("HERDR_ACTIVE_WORKSPACE_ID") end
 print("All five variants: alignment, scoping, missing metadata, selection and cancellation OK")
@@ -795,8 +817,97 @@ end
 print("Refresh session: transitions, retry identity, generation guards and acceptance OK")
 
 do
+  local row = "one\tpreview\tlabel"
+  local session = core.new_session({ row }, "@header\t-\theader")
+  session.has_expect = true
+  local query = "  雪 ' $(touch nope); +change-query(x) \t "
+  local result = runtime.picker_result(query .. "\0ctrl-s\0" .. row .. "\0", session)
+  assert(result.query == query and result.key == "ctrl-s" and result.row == row
+    and result.target == "one" and result.selected_id == "one")
+  equal(runtime.picker_result("\0\0" .. row .. "\0", session).target, "one")
+  result = runtime.picker_result("missing\0ctrl-s\0", session)
+  assert(result.query == "missing" and result.key == "ctrl-s" and not result.selected_id)
+  assert(not runtime.picker_result("\0\0@loading\t-\tLoading\0", session).selected_id)
+  assert(not runtime.picker_result("\0\0unknown\t-\tlabel\0", session).target)
+  session.has_expect = false
+  equal(runtime.picker_result("\0" .. row .. "\0", session).target, "one")
+  assert(not runtime.picker_result("", session).target)
+  session.has_expect = true
+  local generation = session:begin_refresh("one")
+  for _, state in ipairs({ "loading", "error" }) do
+    if state == "error" then assert(session:fail(generation)) end
+    result = runtime.picker_result(query .. "\0ctrl-s\0@loading\t-\tLoading\0", session)
+    equal(result.selected_id, "one")
+    assert(not result.target)
+  end
+  session:close()
+  assert(not runtime.picker_result("\0\0" .. row .. "\0", session).selected_id)
+end
+print("Picker protocol: literal NUL-framed queries, optional expect, active IDs and loading/error memory OK")
+
+do
+  local saved_picker, saved_candidates = runtime.run_picker, core.candidates
+  local saved_herdr, saved_focus = runtime.herdr, runtime.focus_pane
+  local saved_origin = runtime.origin
+  runtime.origin = function() return { workspace_id = "fixture-origin", tab_id = "fixture-tab" } end
+  local order = { 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 8 }
+  local literal = "  雪 ' $(touch nope); +change-query(x) "
+  local invocation, focused = 0, 0
+  core.candidates = function(kind, scope)
+    local prefix = kind .. scope
+    return { prefix .. "A\tp1\tfirst", prefix .. "B\tp2\tsecond" }, "@header\t-\theader"
+  end
+  runtime.herdr = function() focused = focused + 1 end
+  runtime.focus_pane = runtime.herdr
+  for _, exit_code in ipairs({ 130, 0, 2, 130 }) do
+    local step, seen = 0, {}
+    runtime.run_picker = function(_, args, _, _, session)
+      step = step + 1
+      local variant = variants[order[step]]
+      local name, query = variant_name(variant), nil
+      for _, option in ipairs(args) do query = option:match("^%-%-query=(.*)$") or query end
+      local id = variant[2] .. variant[3] .. "B"
+      assert(query == (seen[name] and literal .. name or nil))
+      assert(session.entry_id == (seen[name] and id or nil))
+      if step == 6 and invocation == 0 then
+        local outer, calls = runtime.run_picker, 0
+        runtime.run_picker = function(_, nested_args, _, _, nested)
+          calls = calls + 1
+          assert(nested.popup ~= session.popup)
+          local query
+          for _, option in ipairs(nested_args) do query = option:match("^%-%-query=(.*)$") or query end
+          assert(query == (calls == 2 and "nested query" or nil))
+          assert(not nested.entry_id)
+          return calls == 1 and 1 or 130, { query = "nested query", key = "ctrl-r" }, "", 0
+        end
+        core.pick("tabs", "current", session.settings)
+        assert(calls == 2)
+        runtime.run_picker = outer
+      end
+      seen[name] = true
+      local next_view = order[step + 1]
+      local result = runtime.picker_result(literal .. name .. "\0"
+        .. (next_view and variants[next_view][1] or "") .. "\0" .. session.rows[2] .. "\0", session)
+      session:close()
+      return next_view and 0 or exit_code, result, "fixture failure", 0
+    end
+    local ok, err = pcall(core.pick, "tabs", "current", config.decode("{}"))
+    assert(ok == (exit_code ~= 2), tostring(err))
+    assert(step == #order)
+    invocation = invocation + 1
+  end
+  assert(invocation == 4 and focused == 1)
+  runtime.run_picker, core.candidates = saved_picker, saved_candidates
+  runtime.herdr, runtime.focus_pane = saved_herdr, saved_focus
+  runtime.origin = saved_origin
+end
+print("View memory: all eight independent round trips, same-view save-before-restore, literal argv and fresh popup isolation OK")
+
+do
   local saved_picker, saved_candidates = runtime.run_picker, core.candidates
   local saved_current, saved_snapshot = runtime.current_workspace, core.snapshot_candidates
+  local saved_origin = runtime.origin
+  runtime.origin = function() return { workspace_id = runtime.current_workspace(), tab_id = "original-tab" } end
   local expected_settings = config.decode(json.encode({ preview = { enabled_by_default = false },
     prompt = { variants = prompt_overrides } }))
   local active_prompt
@@ -824,7 +935,7 @@ do
     equal(session:accept(rows[1]), "one")
     assert_prompt(args, active_prompt)
     session:close()
-    return 130, "", "", 0
+    return 130, {}, "", 0
   end
   for _, kind in ipairs({ "tabs", "agents" }) do
     origin = "original-space"
@@ -833,6 +944,7 @@ do
   end
   runtime.run_picker, core.candidates = saved_picker, saved_candidates
   runtime.current_workspace, core.snapshot_candidates = saved_current, saved_snapshot
+  runtime.origin = saved_origin
 end
 print("Refresh scope: captured original workspace survives ambient context changes OK")
 
@@ -932,7 +1044,7 @@ for _, scenario in ipairs({ "success", "error", "wrong-pane", "wrong-id", "malfo
   local saved_request = runtime.socket_request
   runtime.socket_request = function(m, params, id) return saved_request(m, params, id, 20) end
   local ok
-  if method == "pane.focus" then ok = pcall(runtime.focus_agent_pane, "opaque-id")
+  if method == "pane.focus" then ok = pcall(runtime.focus_pane, "opaque-id")
   else ok = pcall(runtime.open_popup, "tabs-current", "original-space",
     config.decode('{"popup":{"width":1000000,"height":"90%"}}')) end
   runtime.socket_request = saved_request
@@ -951,9 +1063,9 @@ core.snapshot_candidates = snapshot_candidates
 dofile(directory .. "/themed_rendering.lua")
 dofile(directory .. "/documentation.lua")
 -- Separate Lua processes keep fixture overrides isolated from real PTY checks.
-for _, name in ipairs({ "columns.lua", "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua" }) do
+for _, name in ipairs({ "pane_launch.lua", "panes.lua", "columns.lua", "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua" }) do
   local code, output, errors = require("pickr.process").run(assert(uv.exepath()),
-    { directory .. "/" .. name }, nil, runtime.fzf_env(), 120000)
+    { directory .. "/" .. name }, nil, runtime.fzf_env(), 600000)
   io.write(output)
   assert(code == 0, name .. ": " .. errors)
 end

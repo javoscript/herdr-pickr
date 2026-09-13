@@ -122,6 +122,9 @@ function M.run(argv, env, keys, input, timeout)
   end)
   if not ok then terminate(); uv.run() end
   local contents = table.concat(screen)
+  if failure and uv.fs_stat(root .. "/output") then
+    failure = failure .. "\nCommand output:\n" .. read(root .. "/output")
+  end
   local result, output
   if ok and not failure then
     ok, err = pcall(function()

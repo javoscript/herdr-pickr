@@ -190,13 +190,15 @@ local function grouped_workspaces(workspaces)
 	return ordered
 end
 
-function M.candidates(kind, scope, settings)
+function M.candidates(kind, scope, settings, origin)
 	-- One consistent snapshot includes server-aggregated statuses and remembered
 	-- tab focus, including inactive tabs (PaneInfo.focused is only global focus).
-	return M.snapshot_candidates(runtime.herdr("api", "snapshot").snapshot, kind, scope, runtime.current_workspace(), settings)
+	local snapshot = runtime.herdr("api", "snapshot").snapshot
+	origin = origin or runtime.origin(nil, snapshot)
+	return M.snapshot_candidates(snapshot, kind, scope, origin.workspace_id, settings, origin.tab_id)
 end
 
-function M.snapshot_candidates(snapshot, kind, scope, current, settings)
+function M.snapshot_candidates(snapshot, kind, scope, current, settings, origin_tab)
 	local roles = settings and settings.roles or default_roles
 	local workspaces = grouped_workspaces(snapshot.workspaces)
 	local directories, targets = tab_directories(snapshot)
@@ -247,6 +249,49 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings)
 			entry.indicator = indicator(workspace, roles)
 			entry.preview_pane = targets[workspace.active_tab_id]
 			entries[#entries + 1] = entry
+		end
+		return render_columns(entries, kind, scope, settings, roles)
+	end
+
+	if kind == "panes" then
+		local panes, layouts, seen = {}, {}, {}
+		for _, pane in ipairs(snapshot.panes) do panes[pane.pane_id] = pane end
+		for _, layout in ipairs(snapshot.layouts) do
+			layouts[layout.workspace_id] = layouts[layout.workspace_id] or {}
+			layouts[layout.workspace_id][layout.tab_id] = layout
+		end
+		for _, workspace in ipairs(workspaces) do
+			local workspace_id = workspace.workspace_id
+			if scope == "all" or workspace_id == current then
+				for _, tab in ipairs(snapshot.tabs) do
+					if tab.workspace_id == workspace_id and (scope ~= "tab" or tab.tab_id == origin_tab) then
+						local layout = layouts[workspace_id] and layouts[workspace_id][tab.tab_id]
+						for _, slot in ipairs(layout and layout.panes or {}) do
+							local pane = panes[slot.pane_id]
+							if pane and not seen[pane.pane_id] and pane.workspace_id == workspace_id
+								and pane.tab_id == tab.tab_id then
+								seen[pane.pane_id] = true
+								local entry = { pane.pane_id, status_text(pane), indicator = indicator(pane, roles),
+									preview_pane = pane.pane_id }
+								if scope == "all" then add_space(entry, workspace_id) end
+								if scope ~= "tab" then entry[#entry + 1] = value(tab.label, tab.tab_id) end
+								entry[#entry + 1] = value(pane.terminal_title_stripped,
+									value(pane.terminal_title, value(pane.title, "-")))
+								entry[#entry + 1] = pane.pane_id
+								local label = clean(pane.label)
+								if label ~= "" then
+									local suffix = "[" .. label .. "]"
+									entry[#entry] = entry[#entry] .. " " .. suffix
+									entry.muted_suffixes = entry.muted_suffixes or {}
+									entry.muted_suffixes[#entry] = suffix
+								end
+								entry[#entry + 1] = directory_label(value(pane.foreground_cwd, pane.cwd))
+								entries[#entries + 1] = entry
+							end
+						end
+					end
+				end
+			end
 		end
 		return render_columns(entries, kind, scope, settings, roles)
 	end
@@ -417,8 +462,7 @@ function Session:close()
 end
 
 local function pick_once(kind, scope, settings, popup)
-	local rows, header = M.candidates(kind, scope, settings)
-	local origin = runtime.current_workspace()
+	local rows, header = M.candidates(kind, scope, settings, popup.origin)
 	local session = M.new_session(rows, header)
 	session.settings = settings
 	session.popup = popup
@@ -434,17 +478,26 @@ local function pick_once(kind, scope, settings, popup)
 	end
 	local title = kind == "workspaces" and "Spaces"
 		or (kind:gsub("^%l", string.upper) .. " — " .. scope .. " space" .. (scope == "all" and "s" or ""))
+	if kind == "panes" then
+		title = ({ tab = "Panes in this tab", current = "Panes in this space", all = "Panes in all spaces" })[scope]
+	end
 	local prompt
+	local view
 	for variant, destination in pairs(keymap.variants) do
 		if destination[1] == kind and destination[2] == scope then
+			view = variant
 			prompt = settings.prompt.variants[variant]
 			break
 		end
 	end
+	local remembered = popup.views[view]
+	session.entry_id = remembered and remembered.selected_id
 	local args = {
 		"--layout=reverse",
 		"--border=rounded",
 		"--no-multi",
+		"--print-query",
+		"--print0",
 		"--ansi",
 		"--delimiter=\t|  ·  ",
 		"--with-nth=3..",
@@ -459,6 +512,7 @@ local function pick_once(kind, scope, settings, popup)
 		themes.options(settings.roles),
 		"--border-label=" .. title,
 	}
+	if remembered then args[#args + 1] = "--query=" .. remembered.query end
 	if footer then args[#args + 1] = "--footer=" .. footer(#rows) end
 	if session.has_expect then args[#args + 1] = "--expect=" .. table.concat(expect, ",") end
 	for _, key in ipairs({ "enter", "esc", "ctrl-c", "ctrl-g", "ctrl-q", "ctrl-z", "double-click" }) do
@@ -476,19 +530,19 @@ local function pick_once(kind, scope, settings, popup)
 	if kind ~= "tabs" or scope == "all" then
 		args[#args + 1] = "--no-sort"
 	end
-	local code, output, errors, signal, target =
+	local code, result, errors, signal =
 		runtime.run_picker("fzf", args, header .. "\n" .. table.concat(rows, "\n"), runtime.fzf_env(), session,
 			function(snapshot)
-				local fresh, heading = M.snapshot_candidates(snapshot, kind, scope, origin, settings)
+				local fresh, heading = M.snapshot_candidates(snapshot, kind, scope,
+					popup.origin.workspace_id, settings, popup.origin.tab_id)
 				M.new_session(fresh, heading) -- Validate the whole generation before publishing any rows.
 				return fresh, heading
 			end, footer)
-	-- --expect emits the pressed shortcut on the first line (blank for Enter).
 	-- A shortcut can exit with code 1 when there are no matching rows.
-	local key, selected = "", output
-	if session.has_expect then key, selected = output:match("^([^\n]*)\n(.*)$") end
+	local key, selected, target = result.key, result.row, result.target
 	local destination = keymap.variants[settings.keymap.reverse[key]]
 	if (code == 0 or code == 1) and (not signal or signal == 0) and destination then
+		popup.views[view] = { query = result.query, selected_id = result.selected_id }
 		return destination
 	end
 	if code == 1 or code == 130 or signal == 2 then
@@ -501,8 +555,8 @@ local function pick_once(kind, scope, settings, popup)
 		error("Picker returned an unknown shortcut", 0)
 	end
 	if target then
-		if kind == "agents" then
-			runtime.focus_agent_pane(target)
+		if kind == "agents" or kind == "panes" then
+			runtime.focus_pane(target)
 		else
 			runtime.herdr(kind == "tabs" and "tab" or "workspace", "focus", target)
 		end
@@ -513,7 +567,7 @@ end
 
 function M.pick(kind, scope, settings)
 	settings = settings or require("pickr.config").owner()
-	local popup = { preview_visible = settings.preview.enabled_by_default }
+	local popup = { preview_visible = settings.preview.enabled_by_default, views = {}, origin = runtime.origin() }
 	while true do
 		local next_picker = pick_once(kind, scope, settings, popup)
 		if not next_picker then

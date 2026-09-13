@@ -8,12 +8,12 @@ Keep bottom shortcut hints predictable and compact by separating picker actions 
 
 ### Requirement: Footer hints use action and variant rows
 
-When `popup.show_hints` is `true`, every picker SHALL place enabled switch, close, preview, and refresh hints on its first footer row, in that order. It SHALL place enabled tabs here, all tabs, spaces, agents here, and all agents hints on its second footer row, in that order, including the current variant's shortcut. With default bindings and hints shown, the footer SHALL contain exactly these two rows. Hints SHALL retain lowercase labels and use ` · ` between hints on the same row. Footer generation SHALL NOT insert additional rows based on text length. Text wider than the available footer area SHALL use normal fzf clipping rather than additional hint rows. When `popup.show_hints` is `false`, the entire footer section SHALL be absent, with no blank rows or footer-only separator reserved for it.
+When `popup.show_hints` is `true`, every picker SHALL place enabled switch, close, preview, and refresh hints on its first footer row, in that order. It SHALL place enabled tabs here, all tabs, spaces, agents here, all agents, panes in tab, panes in space, and all panes hints on its second footer row, in that order, including the current variant's shortcut. With default bindings and hints shown, the footer SHALL contain exactly these two rows. Hints SHALL retain lowercase labels and use ` · ` between hints on the same row. Footer generation SHALL NOT insert additional rows based on text length. Text wider than the available footer area SHALL use normal fzf clipping rather than additional hint rows. When `popup.show_hints` is `false`, the entire footer section SHALL be absent, with no blank rows or footer-only separator reserved for it.
 
 #### Scenario: Default hints in every variant
-- **WHEN** any of the five picker variants opens with default bindings, hints shown, and a nonempty candidate list
+- **WHEN** any of the eight picker variants opens with default bindings, hints shown, and a nonempty candidate list
 - **THEN** its first footer row is `enter: switch · esc/ctrl+c: close · ctrl+p: preview · ctrl+l: refresh`
-- **AND** its second footer row is `ctrl+r: tabs here · ctrl+t: all tabs · ctrl+s: spaces · ctrl+a: agents here · ctrl+g: all agents`
+- **AND** its second footer row is `ctrl+r: tabs here · ctrl+t: all tabs · ctrl+s: spaces · ctrl+a: agents here · ctrl+g: all agents · alt+1: panes in tab · alt+2: panes in space · alt+3: all panes`
 - **AND** no third footer row is generated
 
 #### Scenario: Narrow popup or long aliases
@@ -37,7 +37,7 @@ When hints are shown, grouped hints SHALL use the effective configured keys, ret
 - **AND** remaining hints keep their assigned row and relative order
 
 #### Scenario: All variant controls disabled
-- **WHEN** hints are shown and all five variant shortcut arrays are empty
+- **WHEN** hints are shown and all eight variant shortcut arrays are empty
 - **THEN** only the action row is generated, without a trailing newline
 
 #### Scenario: Empty candidate list

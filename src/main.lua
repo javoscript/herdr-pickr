@@ -13,9 +13,11 @@ if arg[1] == "control" and arg[2] and arg[3] then
   return
 end
 
-local kinds = { tabs = true, workspaces = true, agents = true }
-if not kinds[arg[1]] or (arg[2] ~= "current" and arg[2] ~= "all") or arg[3] then
+local kinds = { tabs = { current = true, all = true }, workspaces = { current = true, all = true },
+  agents = { current = true, all = true }, panes = { tab = true, current = true, all = true } }
+if not kinds[arg[1]] or not kinds[arg[1]][arg[2]] or arg[3] then
   io.stderr:write("Usage: lua src/main.lua tabs|workspaces|agents current|all\n"
+    .. "       lua src/main.lua panes tab|current|all\n"
     .. "       lua src/main.lua preview <pane-id>\n")
   os.exit(2)
 end

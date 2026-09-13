@@ -7,6 +7,9 @@ M.defaults = {
   tabs_all = { "status", "space", "tab", "panes", "directory" },
   agents_current = { "status", "tab", "agent", "title", "pane" },
   agents_all = { "status", "space", "tab", "agent", "title", "pane" },
+  panes_tab = { "status", "title", "pane", "directory" },
+  panes_current = { "status", "tab", "title", "pane", "directory" },
+  panes_all = { "status", "space", "tab", "title", "pane", "directory" },
 }
 
 function M.variant(kind, scope)

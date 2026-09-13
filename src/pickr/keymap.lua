@@ -1,10 +1,12 @@
 local M = {}
-M.order = { "accept", "close", "toggle_preview", "refresh", "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all" }
+M.order = { "accept", "close", "toggle_preview", "refresh", "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }
 M.defaults = { accept = { "enter" }, close = { "esc", "ctrl-c" }, toggle_preview = { "ctrl-p" },
   refresh = { "ctrl-l" }, tabs_current = { "ctrl-r" }, tabs_all = { "ctrl-t" }, spaces = { "ctrl-s" },
-  agents_current = { "ctrl-a" }, agents_all = { "ctrl-g" } }
+  agents_current = { "ctrl-a" }, agents_all = { "ctrl-g" },
+  panes_tab = { "alt-1" }, panes_current = { "alt-2" }, panes_all = { "alt-3" } }
 M.variants = { tabs_current = { "tabs", "current" }, tabs_all = { "tabs", "all" },
-  spaces = { "workspaces", "all" }, agents_current = { "agents", "current" }, agents_all = { "agents", "all" } }
+  spaces = { "workspaces", "all" }, agents_current = { "agents", "current" }, agents_all = { "agents", "all" },
+  panes_tab = { "panes", "tab" }, panes_current = { "panes", "current" }, panes_all = { "panes", "all" } }
 
 -- fzf 0.74.3 parseKeyChords and Unix tui event aliases.
 local aliases = { ["return"] = "enter", ["ctrl-m"] = "enter", ["ctrl-i"] = "tab",
@@ -91,10 +93,11 @@ end
 function M.footer(map, count)
   local labels = { accept = "switch", close = "close", toggle_preview = "preview", refresh = "refresh",
     tabs_current = "tabs here", tabs_all = "all tabs", spaces = "spaces",
-    agents_current = "agents here", agents_all = "all agents" }
+    agents_current = "agents here", agents_all = "all agents",
+    panes_tab = "panes in tab", panes_current = "panes in space", panes_all = "all panes" }
   local groups = {
     { "accept", "close", "toggle_preview", "refresh" },
-    { "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all" },
+    { "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" },
   }
   local lines = {}
   for index, actions in ipairs(groups) do

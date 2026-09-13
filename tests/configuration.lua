@@ -55,7 +55,7 @@ for _, text in ipairs({ "{}", '{"keys":null,"theme":null}',
   for action, keys in pairs(keymap.defaults) do equal(table.concat(settings.keymap.keys[action], ","), table.concat(keys, ",")) end
 end
 equal(themes.fzf(config.decode('{"theme":{"name":"rose-pine","custom":{"annotation":null}}}').roles.annotation), "#524f67")
-local optional = { "toggle_preview", "refresh", "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all" }
+local optional = { "toggle_preview", "refresh", "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }
 for _, action in ipairs(optional) do
   local settings = config.decode('{"keys":{"' .. action .. '":[]}}')
   equal(#settings.keymap.keys[action], 0)
@@ -93,6 +93,14 @@ equal(keymap.normalize("A"), "A")
 equal(keymap.normalize("a"), "a")
 equal(keymap.normalize("ALT-A"), "alt-A")
 equal(keymap.normalize("RETURN"), "enter")
+for _, action in ipairs({ "panes_tab", "panes_current", "panes_all" }) do
+  local defaults = keymap.defaults[action]
+  equal(config.decode('{"keys":{"' .. action .. '":null}}').keymap.keys[action][1], defaults[1])
+  equal(config.decode('{"keys":{"' .. action .. '":["ALT-9","f1"]}}').keymap.keys[action][1], "alt-9")
+  fails(function() config.decode('{"keys":{"refresh":["' .. defaults[1] .. '"]}}') end, "conflicts")
+  local resolved = config.decode('{"keys":{"refresh":["' .. defaults[1] .. '"],"' .. action .. '":[]}}')
+  equal(resolved.keymap.reverse[defaults[1]], "refresh")
+end
 local env = { HERDR_PLUGIN_ID = "javoscript.herdr-pickr", HERDR_PLUGIN_CONFIG_DIR = "/fixture settings" }
 local reads = 0
 local deps = { getenv = function(key) return env[key] end,
@@ -221,7 +229,7 @@ for _, fixture in ipairs(invalid_prompts) do
   deps.read_file = function() return fixture[1] end
   fails(function() config.load(deps) end, "/fixture settings/config.json: " .. fixture[2])
 end
-print("Configuration: prompt inheritance, five variants, literal/empty strings and field/path diagnostics OK")
+print("Configuration: prompt inheritance, eight variants, literal/empty strings and field/path diagnostics OK")
 
 local contents = '{"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120,"show_hints":false},'
   .. '"prompt":{"default":"Original: ","variants":{"spaces":"","agents_all":"Agents: "}}}'

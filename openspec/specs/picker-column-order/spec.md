@@ -44,6 +44,13 @@ By default, each picker SHALL display its existing visible columns in the relati
 - **WHEN** `columns.agents_current` is `["title"]`
 - **THEN** the current-space agents header and rows display only the title column without column separators or a status prefix
 
+#### Scenario: Pane picker defaults
+- **WHEN** a pane picker opens with default columns
+- **THEN** panes-tab displays `status · title · pane · directory`
+- **AND** panes-current displays `status · tab · title · pane · directory`
+- **AND** panes-all displays `status · space · tab · title · pane · directory`
+- **AND** every pane column uses its `pane [label]` heading
+
 ### Requirement: Column reordering preserves picker behavior
 
 Reordering or hiding columns SHALL preserve the retained columns' values and alignment. Status glyph and text SHALL belong to one `status` column and move or hide together. Worktree tree prefixes and parent annotations SHALL remain attached to `space`, and pane labels SHALL remain attached to `pane`, retaining their existing styling when visible. Only configured visible columns, including their attached annotations, SHALL be searchable under the existing independent per-column matching rules. Hidden column values and hidden selection/preview metadata SHALL NOT contribute matches. Scope filtering, candidate ordering, selection targets, and preview targets SHALL remain unchanged, including when status or identifying columns are hidden.

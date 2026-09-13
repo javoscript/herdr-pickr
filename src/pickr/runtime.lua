@@ -122,6 +122,23 @@ function M.control_helper(path, event, argument)
   return buffer
 end
 
+-- fzf emits query, optional expected key, and optional row as NUL records.
+-- Preserve empty records and literal query bytes; candidate validation belongs
+-- to the live session and must happen before teardown clears its IDs.
+function M.picker_result(output, session)
+  local records = {}
+  for record in output:gmatch("(.-)%z") do records[#records + 1] = record end
+  local result = { query = records[1], key = session.has_expect and records[2] or "",
+    row = records[session.has_expect and 3 or 2] }
+  result.target = session:accept(result.row)
+  if session.state == "loading" or session.state == "error" then
+    result.selected_id = session.saved_id
+  else
+    result.selected_id = result.target
+  end
+  return result
+end
+
 function M.run_picker(command, args, input, env, session, render, footer)
   local keymap, map = require("pickr.keymap"), session.settings.keymap
   local function gate(operation, actions) return keymap.gate(map, operation, actions) end
@@ -129,6 +146,11 @@ function M.run_picker(command, args, input, env, session, render, footer)
   local socket, data_path, fzf_socket = root .. "/owner.sock", root .. "/rows", root .. "/fzf.sock"
   local server, peers = uv.new_pipe(false), {}
   local fetch, fzf, terminal_error, answer, pending, loaded
+  if session.entry_id then
+    pending = { generation = session.generation, rows = session.rows, header = session.header }
+    session.saved_id = session.entry_id
+    session.state, session.active = "loading", {}
+  end
   local helper = shell_quote(assert(uv.exepath())) .. " " .. shell_quote(launcher)
     .. " control " .. shell_quote(socket)
   local function write_rows(rows, header)
@@ -216,7 +238,8 @@ function M.run_picker(command, args, input, env, session, render, footer)
       -- result-final's synchronous helper sees this exact matching result set;
       -- no position is computed from an earlier query or asynchronous GET.
       local position, index = 1, 0
-      for id in request.argument:gmatch("[^\n]+") do
+      -- --print0 also frames the {*f1} temporary file with NULs.
+      for id in request.argument:gmatch("[^%z]+") do
         index = index + 1
         if id == session.saved_id then position = index; break end
       end
@@ -253,6 +276,7 @@ function M.run_picker(command, args, input, env, session, render, footer)
       end)
     end))
     args[#args + 1] = "--listen=" .. fzf_socket
+    if pending then args[#args + 1] = "--bind=start:" .. gate("unbind", { "accept", "refresh" }) end
     -- Synchronous transforms acknowledge each toggle before fzf can process a
     -- variant exit, including while loading or displaying a refresh failure.
     for _, key in ipairs(session.settings.keymap.keys.toggle_preview) do
@@ -263,9 +287,7 @@ function M.run_picker(command, args, input, env, session, render, footer)
     end
     args[#args + 1] = "--bind=load:transform(" .. helper .. " load),result-final:transform(" .. helper .. " match {*f1})"
     fzf = M.spawn(command, args, input, env, nil, function(failure, code, output, errors, signal)
-      local selected = output:match("^\n(.*)$")
-      if not session.has_expect then selected = output end
-      answer = { code, output, errors, signal, selected and session:accept(selected:gsub("\n+$", "")) }
+      answer = { code, M.picker_result(output, session), errors, signal }
       if failure and not terminal_error then terminal_error = failure end
       shutdown()
     end)
@@ -276,7 +298,7 @@ function M.run_picker(command, args, input, env, session, render, footer)
   if not ok then error(err, 0) end
   if terminal_error then error(terminal_error, 0) end
   assert(answer)
-  return table.unpack(answer, 1, 5)
+  return table.unpack(answer, 1, 4)
 end
 
 function M.current_workspace(getenv)
@@ -291,6 +313,38 @@ function M.current_workspace(getenv)
     end
   end
   return getenv("HERDR_ACTIVE_WORKSPACE_ID")
+end
+
+-- Capture before creating the popup. An empty handoff explicitly means that
+-- no tab existed at launch; it must never fall through to later active focus.
+function M.origin(getenv, snapshot)
+  getenv = getenv or os.getenv
+  local origin = { workspace_id = M.current_workspace(getenv) }
+  local tab = getenv("PICKR_ORIGIN_TAB_ID")
+  if tab ~= nil then
+    origin.tab_id = tab ~= "" and tab or nil
+    return origin
+  end
+  if getenv("HERDR_PLUGIN_ID") == "javoscript.herdr-pickr" then
+    local context = getenv("HERDR_PLUGIN_CONTEXT_JSON")
+    if context and context ~= "" then
+      context = json.decode(context)
+      if context.workspace_id == origin.workspace_id and context.tab_id and context.tab_id ~= "" then
+        origin.tab_id = context.tab_id
+        return origin
+      end
+    end
+  end
+  if origin.workspace_id then
+    snapshot = snapshot or M.herdr("api", "snapshot").snapshot
+    for _, workspace in ipairs(snapshot.workspaces) do
+      if workspace.workspace_id == origin.workspace_id then
+        origin.tab_id = workspace.active_tab_id ~= "" and workspace.active_tab_id or nil
+        break
+      end
+    end
+  end
+  return origin
 end
 
 local function result(response)
@@ -349,14 +403,14 @@ function M.socket_request(method, params, id, timeout)
   return result(response)
 end
 
-function M.open_popup(entrypoint, workspace, settings)
+function M.open_popup(entrypoint, workspace, settings, tab)
   local reply = M.socket_request("plugin.pane.open", {
     plugin_id = "javoscript.herdr-pickr", entrypoint = entrypoint,
     -- Herdr popups target the active pane and reject explicit workspace targets.
     -- Preserve picker scope through the environment instead.
     placement = "popup", focus = true,
     width = settings.popup.width, height = settings.popup.height,
-    env = { PICKR_ORIGIN_WORKSPACE_ID = workspace,
+    env = { PICKR_ORIGIN_WORKSPACE_ID = workspace, PICKR_ORIGIN_TAB_ID = tab or "",
       PICKR_SETTINGS_SNAPSHOT = require("pickr.config").snapshot(settings) },
   }, "pickr:open")
   local pane = reply.plugin_pane
@@ -367,7 +421,7 @@ function M.open_popup(entrypoint, workspace, settings)
   return pane
 end
 
-function M.focus_agent_pane(pane_id)
+function M.focus_pane(pane_id)
   -- pane.focus also moves the client's workspace/tab view in Herdr 0.9.0.
   local reply = M.socket_request("pane.focus", { pane_id = pane_id }, "pickr:focus")
   if not reply.pane or reply.pane.pane_id ~= pane_id then

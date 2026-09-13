@@ -13,6 +13,8 @@ local expected = {
   spaces = "status,space,tabs,directory", tabs_current = "status,tab,panes,directory",
   tabs_all = "status,space,tab,panes,directory", agents_current = "status,tab,agent,title,pane",
   agents_all = "status,space,tab,agent,title,pane",
+  panes_tab = "status,title,pane,directory", panes_current = "status,tab,title,pane,directory",
+  panes_all = "status,space,tab,title,pane,directory",
 }
 for _, text in ipairs({ '{}', '{"columns":null}', '{"columns":{}}' }) do
   for variant, names in pairs(expected) do
@@ -34,7 +36,8 @@ end
 for _, value in ipairs({ '[]', 'false', '1', '"columns"' }) do
   fails(function() config.decode('{"columns":' .. value .. '}') end, "columns")
 end
-for _, text in ipairs({ '{"tabs_here":null}', '{"tabs_current":["space"]}', '{"agents_all":["directory"]}' }) do
+for _, text in ipairs({ '{"tabs_here":null}', '{"tabs_current":["space"]}', '{"agents_all":["directory"]}',
+  '{"panes_tab":["tab"]}', '{"panes_tab":["space"]}', '{"panes_current":["space"]}' }) do
   fails(function() config.decode('{"columns":' .. text .. '}') end, "columns.")
 end
 local text = '{"columns":{"tabs_all":["directory","tab"],"spaces":["tabs"]}}'
@@ -60,20 +63,26 @@ fails(function() config.load(deps) end, "/fixture/config.json: columns.agents_al
 local launch = [=[
 package.path = arg[1] .. "/src/?.lua;" .. package.path
 local config, runtime = require("pickr.config"), require("pickr.runtime")
-config.load = function() return config.decode('{"columns":{"agents_all":["directory"]}}') end
+local invalid = arg[3]
+config.load = function() return config.decode(invalid) end
 runtime.open_popup = function() error("POPUP_STARTED") end
 runtime.run_picker = function() error("FZF_STARTED") end
 local root, mode = arg[1], arg[2]
 arg = mode == "open" and { "spaces" } or { [0] = root .. "/src/main.lua", "workspaces", "all" }
 dofile(root .. "/src/" .. (mode == "open" and "open.lua" or "main.lua"))
 ]=]
+for _, invalid in ipairs({ { '{"columns":{"agents_all":["directory"]}}', "columns.agents_all" },
+  { '{"columns":{"panes_tab":["tab"]}}', "columns.panes_tab" },
+  { '{"keys":{"panes_all":"alt-3"}}', "keys.panes_all" },
+  { '{"prompt":{"variants":{"panes_current":false}}}', "prompt.variants.panes_current" } }) do
 for _, mode in ipairs({ "open", "main" }) do
   local env = runtime.fzf_env(); env[#env + 1] = "HERDR_ENV=1"
   local code, _, err = require("pickr.process").run(uv.exepath(),
-    { "-e", launch, "--", "-", root, mode }, nil, env, 5000)
+    { "-e", launch, "--", "-", root, mode, invalid[1] }, nil, env, 5000)
   equal(code, 1)
-  assert(err:find("columns.agents_all", 1, true), err)
+  assert(err:find(invalid[2], 1, true), err)
   assert(not err:find("STARTED", 1, true), err)
+end
 end
 print("Columns configuration: defaults, strict validation, snapshot stability and pre-launch errors OK")
 
@@ -88,9 +97,12 @@ local snapshot = {
     { tab_id = "t1", workspace_id = "w1", label = "alpha", pane_count = 1, agent_status = "working" },
     { tab_id = "t2", workspace_id = "w2", label = "beta", pane_count = 1, agent_status = "blocked" },
   },
-  panes = { { pane_id = "p1", cwd = "/directoryonly", label = "review-é\nqueue\t[one]" },
-    { pane_id = "p2", cwd = "/elsewhere", label = "labelonly" } },
-  layouts = { { tab_id = "t1", focused_pane_id = "p1" }, { tab_id = "t2", focused_pane_id = "p2" } },
+  panes = { { pane_id = "p1", workspace_id = "w1", tab_id = "t1", agent_status = "working",
+      terminal_title = "omega", cwd = "/directoryonly", label = "review-é\nqueue\t[one]" },
+    { pane_id = "p2", workspace_id = "w2", tab_id = "t2", agent_status = "blocked",
+      terminal_title = "theta", cwd = "/elsewhere", label = "labelonly" } },
+  layouts = { { workspace_id = "w1", tab_id = "t1", focused_pane_id = "p1", panes = { { pane_id = "p1" } } },
+    { workspace_id = "w2", tab_id = "t2", focused_pane_id = "p2", panes = { { pane_id = "p2" } } } },
   agents = {
     { pane_id = "p1", tab_id = "t1", workspace_id = "w1", agent = "agentonly", agent_status = "working", terminal_title = "omega" },
     { pane_id = "p2", tab_id = "t2", workspace_id = "w2", agent = "otheragent", agent_status = "blocked", terminal_title = "theta" },
@@ -120,12 +132,14 @@ local function alignment(rows, header)
   end
 end
 runtime.current_workspace = function() return "w1" end
+runtime.origin = function() return { workspace_id = "w1", tab_id = "t1" } end
 runtime.herdr = function() return { snapshot = snapshot } end
 runtime.preview_command = function() return "true" end
 local variants = require("pickr.keymap").variants
 for variant, mode in pairs(variants) do
   local defaults = columns.defaults[variant]
-  local baseline, base_header = core.snapshot_candidates(snapshot, mode[1], mode[2], "w1")
+  local baseline, base_header = core.snapshot_candidates(snapshot, mode[1], mode[2], "w1", nil, "t1")
+  assert(#baseline > 0)
   local layouts = { defaults }
   local reversed = {}; for i = #defaults, 1, -1 do reversed[#reversed + 1] = defaults[i] end
   layouts[#layouts + 1] = reversed
@@ -138,7 +152,7 @@ for variant, mode in pairs(variants) do
     for _, theme in ipairs({ "catppuccin", "rose-pine-dawn", "terminal", "custom" }) do
       local settings = config.decode(json.encode({ columns = { [variant] = layout },
         theme = theme == "custom" and { custom = { annotation = "red", status_blocked = "blue" } } or { name = theme } }))
-      local rows, header = core.snapshot_candidates(snapshot, mode[1], mode[2], "w1", settings)
+      local rows, header = core.snapshot_candidates(snapshot, mode[1], mode[2], "w1", settings, "t1")
       equal(#rows, #baseline); alignment(rows, header)
       local header_cells, expected_header = cells(header), cells(base_header)
       for i, row in ipairs(rows) do
@@ -168,7 +182,7 @@ for variant, mode in pairs(variants) do
     end
   end
 end
-print("Columns rendering: five variants, subsets, single columns, moved status, themes, annotations, alignment and identity OK")
+print("Columns rendering: eight variants, subsets, single columns, moved status, themes, annotations, alignment and identity OK")
 
 for _, label in ipairs({ false, "", json.null }) do
   local saved = snapshot.panes[1].label
@@ -185,10 +199,11 @@ local function filter(variant, layout, query, matches)
   local mode, settings = variants[variant], config.decode(json.encode({ columns = { [variant] = layout } }))
   runtime.run_picker = function(_, args, input)
     args[#args + 1] = "--filter=" .. query
+    args[#args + 1] = "--no-print-query"
     local code, output, err = require("pickr.process").run("fzf", args, input, runtime.fzf_env(), 5000)
     equal(code, matches and 0 or 1); assert(err == "", err)
     if matches then assert(output ~= "") else equal(output, "") end
-    return 130, "", ""
+    return 130, {}, ""
   end
   core.pick(mode[1], mode[2], settings)
 end
@@ -206,6 +221,17 @@ for _, case in ipairs({
   { "agents_all", { "agent", "status" }, "blocked", true },
   { "spaces", { "tabs" }, "parent", false },
   { "spaces", { "tabs" }, "tabs", true },
+  { "panes_tab", { "directory", "pane" }, "directoryonly review", true },
+  { "panes_current", { "title", "directory" }, "omega directoryonly", true },
+  { "panes_current", { "title", "directory" }, "omegadirectoryonly", false },
+  { "panes_all", { "pane" }, "labelonly", true },
+  { "panes_all", { "title" }, "p2", false },
+  { "panes_all", { "title" }, "labelonly", false },
+  { "panes_all", { "title" }, "elsewhere", false },
+  { "panes_all", { "title" }, "blocked", false },
+  { "panes_all", { "title" }, "beta", false },
+  { "panes_all", { "title" }, "child", false },
+  { "panes_all", { "space" }, "parent", true },
 }) do filter(table.unpack(case)) end
 for variant, defaults in pairs(columns.defaults) do
   filter(variant, { defaults[2] }, "p1", false)
@@ -213,15 +239,16 @@ for variant, defaults in pairs(columns.defaults) do
 end
 
 -- Same resolved settings are carried through switches and refresh failure/retry.
-local settings = config.decode('{"columns":{"tabs_current":["tab"],"tabs_all":["directory"],"spaces":["tabs"],"agents_current":["title"],"agents_all":["agent"]}}')
-local sequence = { "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all" }
-local keys = { tabs_all = "ctrl-t", spaces = "ctrl-s", agents_current = "ctrl-a", agents_all = "ctrl-g" }
+local settings = config.decode('{"columns":{"tabs_current":["tab"],"tabs_all":["directory"],"spaces":["tabs"],"agents_current":["title"],"agents_all":["agent"],"panes_tab":["title"],"panes_current":["pane"],"panes_all":["directory"]}}')
+local sequence = { "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }
+local keys = { tabs_all = "ctrl-t", spaces = "ctrl-s", agents_current = "ctrl-a", agents_all = "ctrl-g",
+  panes_tab = "alt-1", panes_current = "alt-2", panes_all = "alt-3" }
 local visits, focused = 0, nil
-runtime.focus_agent_pane = function(id) focused = id end
+runtime.focus_pane = function(id) focused = id end
 runtime.run_picker = function(_, args, input, _, session, render)
   visits = visits + 1
   local variant, mode = sequence[visits], variants[sequence[visits]]
-  local expected_rows, expected_header = core.snapshot_candidates(snapshot, mode[1], mode[2], "w1", settings)
+  local expected_rows, expected_header = core.snapshot_candidates(snapshot, mode[1], mode[2], "w1", settings, "t1")
   equal(input, expected_header .. "\n" .. table.concat(expected_rows, "\n"))
   assert(table.concat(args, "\n"):find("--nth=1\n", 1, true))
   equal(session.settings, settings)
@@ -236,9 +263,9 @@ runtime.run_picker = function(_, args, input, _, session, render)
   rows, header = render(snapshot)
   equal(table.concat(rows, "\n"), table.concat(expected_rows, "\n")); equal(header, expected_header)
   assert(session:publish(generation, rows, header))
-  if sequence[visits + 1] then return 1, keys[sequence[visits + 1]] .. "\n", "" end
-  return 0, "\n" .. rows[1], "", nil, session:accept(rows[1])
+  if sequence[visits + 1] then return 1, { query = "", key = keys[sequence[visits + 1]] }, "" end
+  return 0, { query = "", key = "", row = rows[1], target = session:accept(rows[1]) }, ""
 end
 core.pick("tabs", "current", settings)
-equal(visits, 5); equal(focused, "p2")
+equal(visits, 8); equal(focused, "p1")
 print("Columns matching/session: real fzf visible-only independent matching, hidden IDs, switches, empty refresh, failure/retry and acceptance OK")
