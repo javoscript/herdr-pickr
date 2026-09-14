@@ -25,6 +25,7 @@
 - 🚦 **Attention first.** Agent statuses put blocked work and unseen completions up front.
 - 👀 **Peek before you jump.** Color terminal snapshots, right in the popup.
 - ⚡ **Keep your place.** Switch types, narrow scope, and refresh without leaving the picker; each type remembers its search and selection.
+- 🔄 **Opt-in live updates.** Refresh candidates and the selected visible preview periodically; keep browsing while fresh data is fetched.
 - 🎨 **Make it yours.** Choose and reorder columns; remap actions and tune themes, colors, prompts, size, and previews.
 
 ---
@@ -159,6 +160,7 @@ preview or a focus error rather than selecting a different terminal.
 - [Columns](#displayed-columns)
 - [Popup size](#popup-size)
 - [Preview](#initial-preview-visibility)
+- [Automatic refresh](#automatic-refresh)
 - [Themes](#themes-and-custom-colors)
 - [Search prompt](#search-prompt)
 - [fzf compatibility](#fzf-compatibility-and-inherited-bindings)
@@ -278,6 +280,9 @@ Create `config.json` in that directory. Here is the complete default configurati
   },
   "preview": {
     "enabled_by_default": true
+  },
+  "refresh": {
+    "interval_ms": 0
   },
   "theme": {
     "name": "catppuccin",
@@ -430,13 +435,28 @@ search, use ordinary query editing, such as <kbd>Ctrl</kbd>+<kbd>U</kbd> with th
 cursor at the end, or an inherited `clear-query` binding on an unclaimed key.
 No additional setting is needed.
 
-Refresh preserves the query and selection when still matched. During refresh,
-accept/refresh keys are disabled; after failure, refresh retries and acceptance
-stays disabled until success. Switching during loading or failure remembers the
-latest query and pre-refresh selection, and cancels pending refresh work.
-Returning fetches fresh candidates rather than resuming the old refresh.
-Acceptance also waits for selection restoration on view entry; closing, view
-shortcuts, query editing, and enabled preview toggling remain available.
+Refresh retains the current results, headings, query, and preview while fetching
+and preparing new candidates. You can keep typing, navigating, switching views,
+or accepting a displayed result. Failure leaves those results usable and shows a
+compact error with configured retry keys. Switching during a fetch or failure
+saves the latest query and displayed selection and cancels source work.
+Returning fetches fresh candidates rather than resuming an old refresh.
+
+The final replacement uses native fzf identity tracking over prepared local
+rows. It follows the selected ID if still matched and otherwise uses fzf's
+normal fallback. **Keystrokes during this final replacement can be ignored by
+fzf**; Pickr does not buffer or replay them. Herdr fetching and preview reads
+are outside that input lock. A stuck replacement fails the session after a
+2-second publication timeout. Accepting a displayed target that has since closed
+reports a focus error rather than selecting another entity.
+
+The fzf info counter shows matching items / total candidates in the current
+view (for example, `3/9`). Its loading spinner remains visible during reloads,
+but Pickr hides the temporary `+t`/`+t*` tracking indicator to avoid refresh flicker.
+
+Acceptance still waits for explicit selection restoration on view entry;
+closing, view shortcuts, query editing, and enabled preview toggling remain
+available during that separate entry-restoration phase.
 
 Footer hints show configured aliases and hide disabled actions. Controls occupy
 the first row, the four type shortcuts the second; long rows clip rather than wrap.
@@ -568,6 +588,53 @@ Set `preview.enabled_by_default` to `false` to start hidden; the default is `tru
 Only booleans or null are accepted. Switching, refresh, and retry preserve toggled
 visibility; reopening restores the configured default. Previews are screen
 snapshots, not streams, updated on selection changes and successful refresh.
+
+Panes and Agents preview the exact selected pane. Tabs use their remembered
+focused pane; Spaces use the active tab's remembered focused pane. Refresh updates
+these targets too. Missing targets show a no-pane message; unreadable panes show
+an unavailable message and can recover on a later refresh. Hidden previews and
+zero matches request no screen reads. A slow same-target capture is allowed to
+finish while candidate refreshes continue. Native fzf preview refresh
+returns the preview to the top; scroll offsets are not preserved across refreshes.
+
+### Automatic refresh
+
+Automatic refresh is disabled by default. To enable one-second updates:
+
+```json
+{
+  "refresh": {
+    "interval_ms": 1000
+  }
+}
+```
+
+`refresh.interval_ms` accepts finite integers from `0` through `2147483647`
+milliseconds. Missing, null, or zero values disable periodic work; positive
+values are used without clamping. An omitted, null, or empty `refresh` object
+also keeps the default of zero. Invalid types, ranges, or unknown fields block
+launch with a configuration diagnostic.
+
+The first attempt occurs one interval after the view is ready. The interval is
+an attempt cadence, not a guarantee of exact publication timing. Only one
+candidate refresh runs at a time; busy ticks and manual triggers are skipped
+without queued catch-up. Manual refresh does not reset the cadence. Type or
+effective-scope transitions start a fresh cadence after destination readiness;
+a scope choice that leaves the effective scope unchanged does not restart it.
+
+Routine automatic refreshes do not show a `Refreshing…` status line, keeping
+the scope header and results list from shifting on every tick. Manual refresh
+still shows progress, and refresh failures still show an error until recovery.
+
+All four types and their supported scopes use the same interval. Empty lists,
+zero matches, hidden previews, and `keys.refresh: []` do not suspend automatic
+list updates. Successful updates renew the selected visible preview even when
+row text is unchanged. Automatic attempts continue after recoverable failures;
+the error remains visible until successful recovery. Each popup owns its timer,
+which is disposed on acceptance, close, or transition.
+
+**Close and reopen Pickr to apply interval edits.** The resolved value stays
+fixed through launcher handoff, type/scope changes, refresh, and retry.
 
 ### Themes and custom colors
 
@@ -728,6 +795,24 @@ herdr plugin log list --plugin javoscript.herdr-pickr --limit 5
 ```
 
 ---
+
+## Development and regression checks
+
+Project code lives in `src/pickr/`; `src/main.lua` runs pickers and preview/control
+helpers, and `src/open.lua` launches popups. Lua regression fixtures live in
+`tests/`, with OpenSpec capabilities and change plans in `openspec/`.
+
+Run the complete suite from the checkout:
+
+```sh
+lua tests/test.lua
+```
+
+The suite includes changing-snapshot tests and real-fzf checks for live refresh,
+preview cancellation/coalescing, native scroll reset, and popup timer lifecycle.
+Allow several minutes. Its PTY harness currently uses macOS `script`/`stty`;
+Linux PTY regression execution is not yet supported. Focused live checks are
+`lua tests/live_snapshots.lua` and `lua tests/live_refresh.lua`.
 
 ## License and attribution
 

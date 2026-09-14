@@ -247,7 +247,8 @@ runtime.run_picker = function(_, args, _, _, session, render)
   assert(selected)
   local generation = session:begin_refresh("p2")
   assert(session:fail(generation))
-  equal(runtime.picker_result("edited\0ctrl-z\0", session).selected_id, "p2")
+  equal(runtime.picker_result("edited\0ctrl-z\0" .. selected .. "\0", session).selected_id, "p2")
+  assert(not runtime.picker_result("nomatch\0ctrl-z\0", session).selected_id)
   generation = session:begin_refresh(nil)
   local fresh = json.decode(json.encode(snapshot))
   fresh.panes[2].tab_id = "B"
@@ -256,7 +257,7 @@ runtime.run_picker = function(_, args, _, _, session, render)
   assert(session:publish(generation, refreshed, heading))
   if variant == "panes" and scope == "tab" then
     assert(not ids(refreshed):find("p2", 1, true))
-    assert(not session:accept(selected))
+    equal(session:accept(selected), "p2") -- A retiring row already emitted by fzf remains valid.
   elseif variant == "panes" then
     equal(ids(refreshed):sub(1, #"p5,p2"), "p5,p2")
   end

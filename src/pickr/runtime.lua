@@ -1,6 +1,6 @@
 local uv = require("luv")
 local json = require("pickr.vendor.json")
-local M = {}
+local M = { publication_timeout_ms = 2000 }
 
 local directory = assert(uv.fs_realpath(debug.getinfo(1, "S").source:sub(2))):match("^(.*)/[^/]+$")
 local launcher = assert(directory:match("^(.*)/[^/]+$")) .. "/main.lua"
@@ -9,11 +9,12 @@ local function shell_quote(text)
   return "'" .. text:gsub("'", "'\\''") .. "'"
 end
 
-function M.preview_command()
+local function preview_command()
   -- fzf shell-quotes the hidden second field before substituting {2}.
   return shell_quote(assert(uv.exepath())) .. " " .. shell_quote(launcher)
     .. " preview {2}"
 end
+M.preview_command = preview_command
 
 local function close(handle)
   if handle and not handle:is_closing() then handle:close() end
@@ -92,6 +93,36 @@ function M.snapshot_async(callback)
     end)
 end
 
+function M.preview_async(pane_id, callback)
+  local job, cancelled = nil, false
+  local unavailable = "Preview unavailable: pane closed or could not be read.\n"
+  local binary = os.getenv("HERDR_BIN_PATH") or "herdr"
+  if pane_id == "-" then
+    local timer = uv.new_timer()
+    timer:start(0, 0, function() close(timer); callback("No pane available for preview.\n") end)
+    return { cancel = function() close(timer) end }
+  end
+  job = M.spawn(binary, { "pane", "get", pane_id }, nil, nil, 10000, function(err, code, output)
+    if cancelled then return end
+    local ok, pane = pcall(function()
+      local response = json.decode(output)
+      return assert(not response.error and response.result and response.result.pane)
+    end)
+    if err or code ~= 0 or not ok then callback(unavailable); return end
+    job = M.spawn(binary, { "pane", "read", pane_id, "--source", "visible", "--ansi", "--raw" },
+      nil, nil, 10000, function(read_error, read_code, screen)
+        if cancelled then return end
+        if read_error or read_code ~= 0 then callback(unavailable); return end
+        local formatted, content = pcall(require("pickr.core").preview_content, pane_id, pane, screen)
+        callback(formatted and content or unavailable)
+      end)
+  end)
+  return { cancel = function()
+    cancelled = true
+    if job then job:cancel() end
+  end }
+end
+
 -- A small JSON-line protocol connects short-lived fzf transform helpers to the
 -- picker owner. Helpers never fetch snapshots or own the interactive lifecycle.
 function M.control_helper(path, event, argument)
@@ -106,7 +137,7 @@ function M.control_helper(path, event, argument)
     failure = err
     close(peer); close(timer)
   end
-  timer:start(2000, 0, function() finish("Picker control timed out") end)
+  timer:start(event == "preview" and 22000 or 2000, 0, function() finish("Picker control timed out") end)
   peer:connect(path, function(err)
     if err then finish(err); return end
     peer:read_start(function(read_error, data)
@@ -131,7 +162,7 @@ function M.picker_result(output, session)
   local result = { query = records[1], key = session.has_expect and records[2] or "",
     row = records[session.has_expect and 3 or 2] }
   result.target = session:accept(result.row)
-  if session.state == "loading" or session.state == "error" then
+  if session.state == "loading" then
     result.selected_id = session.saved_id
   else
     result.selected_id = result.target
@@ -150,7 +181,8 @@ function M.run_picker(command, args, input, env, session, render, footer)
   local root = assert(uv.fs_mkdtemp("/tmp/pickr-XXXXXX"))
   local socket, data_path, fzf_socket = root .. "/owner.sock", root .. "/rows", root .. "/fzf.sock"
   local server, peers = uv.new_pipe(false), {}
-  local fetch, fzf, terminal_error, answer, pending, loaded
+  local fetch, fzf, terminal_error, answer, pending, loaded, publication_timer, refresh_timer, preview
+  local start_refresh
   if session.entry_id then
     pending = { generation = session.generation, rows = session.rows, header = session.header }
     session.saved_id = session.entry_id
@@ -164,10 +196,13 @@ function M.run_picker(command, args, input, env, session, render, footer)
     local closed, close_error = file:close()
     assert(ok, err); assert(closed, close_error)
   end
-  local reload = "reload(cat " .. shell_quote(data_path) .. ")"
+  local reload = "track-current+reload-sync(cat " .. shell_quote(data_path) .. ")"
   local function shutdown()
     session:close()
     if fetch then fetch:cancel(); fetch = nil end
+    close(publication_timer)
+    close(refresh_timer)
+    if preview then preview:close() end
     close(server)
     for peer in pairs(peers) do close(peer) end
   end
@@ -205,8 +240,9 @@ function M.run_picker(command, args, input, env, session, render, footer)
   local function failed(generation)
     if session:fail(generation) then
       pending, loaded = nil, false
-      post(gate("rebind", { "refresh" }) .. "+change-header:"
-        .. header("Refresh failed" .. (#map.keys.refresh > 0 and " — " .. keymap.display(map.keys.refresh) .. " to retry" or "")))
+      post("change-header:"
+        .. header("Refresh failed" .. (#map.keys.refresh > 0 and " — " .. keymap.display(map.keys.refresh) .. " to retry" or "")
+          .. (session.settings.refresh.interval_ms > 0 and " — automatic retry" or "")))
     end
   end
   local function start_fetch()
@@ -219,16 +255,49 @@ function M.run_picker(command, args, input, env, session, render, footer)
       if not ok then failed(generation); return end
       local written = pcall(write_rows, rows, header)
       if not written then failed(generation); return end
-      pending, loaded = { generation = generation, rows = rows, header = header }, false
+      local valid, staged = pcall(session.stage, session, generation, rows, header)
+      if not valid or not staged then failed(generation); return end
+      pending, loaded = { generation = generation, rows = rows, header = header,
+        refresh = true, started = uv.hrtime() }, false
+      publication_timer = uv.new_timer()
+      publication_timer:start(M.publication_timeout_ms, 0, function() fatal("Picker publication timed out") end)
       post(reload)
     end)
   end
-  local clearing = false
+  start_refresh = function()
+    if not session:begin_refresh() then return false end
+    start_fetch()
+    return true
+  end
+  local function ready_timer()
+    session.ready_at = session.ready_at or uv.hrtime()
+    if refresh_timer or session.settings.refresh.interval_ms == 0 then return end
+    refresh_timer = uv.new_timer()
+    local interval = session.settings.refresh.interval_ms
+    refresh_timer:start(interval, interval, function()
+      -- Routine ticks are quiet: adding/removing a progress line on every
+      -- interval shifts the list. Failures still report their status below.
+      start_refresh()
+    end)
+  end
+  if M.preview_command == preview_command then
+    preview = require("pickr.live_preview").new(M.preview_async, function()
+      if session.state ~= "closed" then post("refresh-preview") end
+    end)
+    env[#env + 1] = "PICKR_PREVIEW_SOCKET=" .. socket
+  end
   local function event(request)
     if session.state == "closed" then return "" end
     if request.event == "toggle-preview" then
       session.popup.preview_visible = not session.popup.preview_visible
+      if preview then preview:select(preview.target, session.popup.preview_visible) end
       return "toggle-preview"
+    elseif request.event == "selected" then
+      if preview then preview:select(request.argument, session.popup.preview_visible) end
+      return ""
+    elseif request.event == "renew-preview" then
+      if preview then preview:refresh(request.argument, session.popup.preview_visible) end
+      return ""
     elseif request.event == "scope" then
       local pickers = require("pickr.pickers")
       local chosen = request.argument
@@ -240,16 +309,22 @@ function M.run_picker(command, args, input, env, session, render, footer)
       end
       return ""
     elseif request.event == "refresh" then
-      if not session:begin_refresh(request.argument) then return "" end
-      pending, loaded, clearing = nil, false, true
-      write_rows({}, session.header)
-      return gate("unbind", { "accept", "refresh" }) .. "+" .. reload .. "+change-header:" .. header("Refreshing…")
+      if not start_refresh() then return "" end
+      -- Preserve a failure until successful recovery; repeated attempts must
+      -- not make retained results appear fresh by clearing their error.
+      return "change-header:" .. header(status or "Refreshing…")
     elseif request.event == "load" then
-      if clearing then
-        clearing = false
-        start_fetch()
-      elseif pending then loaded = true end
+      loaded = true
+    elseif request.event == "match" and not pending and loaded then
+      loaded = false
+      ready_timer()
     elseif request.event == "match" and pending and loaded then
+      if pending.refresh then
+        loaded = false
+        -- Native ID tracking has already restored/fallen back before this
+        -- acknowledgement. Stop tracking so later query edits remain ordinary.
+        return "untrack-current+transform(" .. helper .. " ready)"
+      end
       -- result-final's synchronous helper sees this exact matching result set;
       -- no position is computed from an earlier query or asynchronous GET.
       local position, index = 1, 0
@@ -263,13 +338,17 @@ function M.run_picker(command, args, input, env, session, render, footer)
       -- after fzf has applied the position and refreshed the preview target.
       return "pos(" .. position .. ")+refresh-preview+transform(" .. helper .. " ready)"
     elseif request.event == "ready" and pending then
+      if pending.started then session.publication_ms = (uv.hrtime() - pending.started) / 1000000 end
       session:publish(pending.generation, pending.rows, pending.header)
+      close(publication_timer); publication_timer = nil
       pending, loaded = nil, false
       header()
+      ready_timer()
       -- Each arbitrary display string owns the tail of its action expression.
       -- A separate synchronous transform avoids interpreting punctuation in
       -- configured key labels as change-footer/header delimiters.
       return gate("rebind", { "accept", "refresh" })
+        .. "+transform(" .. helper .. " renew-preview {2})"
         .. "+transform(" .. helper .. " header)"
         .. (footer and "+change-footer:" .. footer(#session.rows) or "")
     elseif request.event == "header" then
@@ -281,23 +360,44 @@ function M.run_picker(command, args, input, env, session, render, footer)
     assert(server:bind(socket))
     assert(server:listen(16, function(listen_error)
       if listen_error then fatal(listen_error); return end
-      local peer, buffer = uv.new_pipe(false), ""
+      local peer, buffer, unsubscribe = uv.new_pipe(false), "", nil
+      local function reply(content)
+        if peer:is_closing() then return end
+        peer:read_stop()
+        peer:write(content, function()
+          if not peer:is_closing() then
+            peer:shutdown(function() close(peer); peers[peer] = nil end)
+          end
+        end)
+      end
       peers[peer] = true
       assert(server:accept(peer))
       peer:read_start(function(read_error, data)
         if session.state == "closed" then return end
-        if read_error or not data then close(peer); peers[peer] = nil; return end
+        if read_error or not data then
+          if unsubscribe then unsubscribe() end
+          close(peer); peers[peer] = nil; return
+        end
         buffer = buffer .. data
         if not buffer:find("\n", 1, true) then return end
-        peer:read_stop()
-        local handled, actions = pcall(function() return event(json.decode(buffer)) end)
-        if not handled then fatal(actions); return end
-        peer:write(actions, function()
-          peer:shutdown(function() close(peer); peers[peer] = nil end)
+        local handled, actions = pcall(function()
+          local request = json.decode(buffer)
+          if request.event == "preview" and preview then
+            unsubscribe = preview:request(request.argument, session.popup.preview_visible, reply)
+            return nil
+          end
+          return event(request)
         end)
+        if not handled then fatal(actions); return end
+        if actions then reply(actions) end
       end)
     end))
     args[#args + 1] = "--listen=" .. fzf_socket
+    args[#args + 1] = "--id-nth=1"
+    -- Hide one-off tracking feedback without changing tracking or other info.
+    -- Use shell builtins only: fzf runs info commands synchronously.
+    args[#args + 1] = [[--info-command=info=$FZF_INFO; case "$info" in *" +t"*) suffix=${info#*" +t"}; info=${info%%" +t"*}${suffix#\*};; esac; printf '%s' "$info"]]
+    if preview then args[#args + 1] = "--bind=focus:transform(" .. helper .. " selected {2})" end
     if pending then args[#args + 1] = "--bind=start:" .. gate("unbind", { "accept", "refresh" }) end
     -- Synchronous transforms acknowledge each toggle before fzf can process a
     -- variant exit, including while loading or displaying a refresh failure.
@@ -475,7 +575,8 @@ end
 function M.fzf_env()
   local env = {}
   for key, value in pairs(uv.os_environ()) do
-    if key ~= "FZF_DEFAULT_OPTS" and key ~= "FZF_DEFAULT_OPTS_FILE" and key ~= "FZF_API_KEY" then
+    if key ~= "FZF_DEFAULT_OPTS" and key ~= "FZF_DEFAULT_OPTS_FILE" and key ~= "FZF_API_KEY"
+      and key ~= "PICKR_PREVIEW_SOCKET" then
       env[#env + 1] = key .. "=" .. value
     end
   end

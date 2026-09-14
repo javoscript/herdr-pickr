@@ -47,9 +47,16 @@ local function prompt_string(value, field)
   return value
 end
 
+local function refresh_interval(value)
+  if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then
+    error("refresh.interval_ms: expected a finite integer from 0 to 2147483647", 0)
+  end
+  return value
+end
+
 function M.decode(text)
   local config = json.decode(text, true)
-  object(config, "config", { keys = true, theme = true, preview = true, popup = true, prompt = true, columns = true })
+  object(config, "config", { keys = true, theme = true, preview = true, refresh = true, popup = true, prompt = true, columns = true })
   local columns = require("pickr.columns").resolve(config.columns)
   local keys, name, custom = {}, nil, {}
   local keymap, themes = require("pickr.keymap"), require("pickr.themes")
@@ -75,6 +82,13 @@ function M.decode(text)
       for _, role in ipairs(themes.roles) do allowed[role] = true end
       object(config.theme.custom, "theme.custom", allowed)
       for role, value in pairs(config.theme.custom) do if not omitted(value) then custom[role] = value end end
+    end
+  end
+  local refresh = { interval_ms = 0 }
+  if not omitted(config.refresh) then
+    object(config.refresh, "refresh", { interval_ms = true })
+    if not omitted(config.refresh.interval_ms) then
+      refresh.interval_ms = refresh_interval(config.refresh.interval_ms)
     end
   end
   local preview = { enabled_by_default = true }
@@ -126,7 +140,7 @@ function M.decode(text)
       or prompt_string(overrides[variant], "prompt.variants." .. variant)
   end
   return { keymap = keymap.resolve(keys), roles = themes.resolve(name, custom),
-    theme_name = name or "catppuccin", preview = preview, popup = popup, prompt = prompt, columns = columns }
+    theme_name = name or "catppuccin", preview = preview, refresh = refresh, popup = popup, prompt = prompt, columns = columns }
 end
 
 local function read_file(path)
@@ -160,7 +174,7 @@ end
 -- Only the launcher writes this handoff. Serialize resolved values so the owner
 -- never resolves defaults, discovers a directory, or rereads the configuration.
 function M.snapshot(settings)
-  return json.encode({ version = 2, settings = settings })
+  return json.encode({ version = 3, settings = settings })
 end
 
 function M.owner(deps)
@@ -169,7 +183,7 @@ function M.owner(deps)
   if snapshot == nil then return M.load(deps) end
   local ok, result = pcall(function()
     local handoff = json.decode(snapshot, true)
-    assert(type(handoff) == "table" and handoff.version == 2, "incompatible settings handoff: unsupported snapshot version")
+    assert(type(handoff) == "table" and handoff.version == 3, "incompatible settings handoff: unsupported snapshot version")
     local settings = handoff.settings
     assert(type(settings) == "table" and type(settings.keymap) == "table"
       and type(settings.keymap.keys) == "table" and type(settings.keymap.reverse) == "table"
@@ -177,6 +191,8 @@ function M.owner(deps)
       and type(settings.popup) == "table" and type(settings.prompt) == "table"
       and type(settings.prompt.variants) == "table", "invalid settings snapshot")
     assert(type(settings.popup.show_hints) == "boolean", "popup.show_hints: expected a boolean")
+    object(settings.refresh, "refresh", { interval_ms = true })
+    refresh_interval(settings.refresh.interval_ms)
     settings.columns = require("pickr.columns").resolve(settings.columns, true)
     prompt_string(settings.prompt.default, "prompt.default")
     for variant in pairs(require("pickr.keymap").variants) do

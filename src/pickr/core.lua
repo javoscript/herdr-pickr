@@ -409,13 +409,17 @@ function M.preview(pane_id)
 	local ok, output = pcall(function()
 		local pane = runtime.herdr("pane", "get", pane_id).pane
 		local screen = runtime.read_visible(pane_id)
-		local cwd = clean(value(pane.foreground_cwd, value(pane.cwd, "—")))
-		return clean(pane_id) .. "\n" .. cwd .. "\n\n" .. (screen ~= "" and screen or "(Empty screen)") .. "\27[0m\n"
+		return M.preview_content(pane_id, pane, screen)
 	end)
 	if not ok then
 		return "Preview unavailable: pane closed or could not be read.\n"
 	end
 	return output
+end
+
+function M.preview_content(pane_id, pane, screen)
+	local cwd = clean(value(pane.foreground_cwd, value(pane.cwd, "—")))
+	return clean(pane_id) .. "\n" .. cwd .. "\n\n" .. (screen ~= "" and screen or "(Empty screen)") .. "\27[0m\n"
 end
 
 local keymap = require("pickr.keymap")
@@ -424,7 +428,7 @@ local Session = {}
 Session.__index = Session
 
 local function candidate_id(row)
-	if type(row) ~= "string" or row:find("[\r\n]") then return nil end
+	if type(row) ~= "string" or row:find("[\r\n%z]") then return nil end
 	local id = row:match("^([^%s]+)\t[^\t]+\t[^\t]*$")
 	if id and id:sub(1, 1) ~= "@" then return id end
 end
@@ -435,44 +439,58 @@ function M.new_session(rows, header)
 	return session
 end
 
-function Session:begin_refresh(id)
-	if self.state ~= "ready" and self.state ~= "error" then return nil end
-	if self.state == "ready" then self.saved_id = self.active[id] and id or nil end
+function Session:begin_refresh()
+	if self.state ~= "ready" or self.refresh_state == "fetching" or self.refresh_state == "publishing" then return nil end
 	self.generation = self.generation + 1
-	self.state, self.active = "loading", {}
+	self.refresh_state = "fetching"
 	return self.generation
 end
 
 function Session:is_current(generation)
-	return self.state == "loading" and self.generation == generation
+	return self.state ~= "closed" and self.generation == generation
+		and (self.state == "loading" or self.refresh_state == "fetching" or self.refresh_state == "publishing")
 end
 
-function Session:publish(generation, rows, header)
+function Session:stage(generation, rows, header)
 	if not self:is_current(generation) then return false end
-	local active = {}
+	assert(type(header) == "string" and not header:find("[\r\n%z]"), "Malformed header")
+	local active, by_row = {}, {}
 	for _, row in ipairs(rows) do
 		local id = assert(candidate_id(row), "Malformed candidate")
 		assert(not active[id], "Duplicate candidate ID")
-		active[id] = true
+		-- fzf can emit the ANSI-stripped form of the validated input row.
+		active[id], by_row[row:gsub("\27%[[%d;]*m", "")] = true, id
 	end
-	self.rows, self.header, self.active, self.state = rows, header, active, "ready"
+	self.staged = { rows = rows, header = header, active = active, by_row = by_row }
+	self.refresh_state = "publishing"
+	return true
+end
+
+function Session:publish(generation, rows, header)
+	if not self:stage(generation, rows, header) then return false end
+	local staged = self.staged
+	self.retiring = self.by_row
+	self.rows, self.header, self.active, self.by_row = rows, header, staged.active, staged.by_row
+	self.state, self.refresh_state, self.staged = "ready", nil, nil
 	return true
 end
 
 function Session:fail(generation)
 	if not self:is_current(generation) then return false end
-	self.state, self.active = "error", {}
+	self.refresh_state, self.staged = "error", nil
 	return true
 end
 
 function Session:accept(row)
-	local id = candidate_id(row)
-	if self.state == "ready" and self.active[id] then return id end
+	if self.state ~= "ready" or not candidate_id(row) then return nil end
+	row = row:gsub("\27%[[%d;]*m", "")
+	return self.by_row[row] or (self.staged and self.staged.by_row[row]) or (self.retiring and self.retiring[row])
 end
 
 function Session:close()
 	self.generation = self.generation + 1
 	self.state, self.active = "closed", {}
+	self.by_row, self.retiring, self.staged, self.refresh_state = nil, nil, nil, nil
 end
 
 local function pick_once(kind, scope, settings, popup)

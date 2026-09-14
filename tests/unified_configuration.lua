@@ -35,8 +35,8 @@ for kind, layout in pairs(defaults) do
   end
 end
 local handoff = json.decode(config.snapshot(config.decode("{}")))
-assert(handoff.version == 2)
-handoff.version = 1
+assert(handoff.version == 3)
+handoff.version = 2
 local ok, err = pcall(config.owner, { getenv = function() return json.encode(handoff) end,
   read_file = function() error("Must not reread incompatible handoff") end })
 assert(not ok and err:find("incompatible settings handoff", 1, true))

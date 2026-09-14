@@ -124,8 +124,8 @@ assert(#states == 3 and results[3].target == "b", output)
 -- Rapid effective scope transitions while loading or failed retain recovery IDs.
 for _, mode in ipairs({ "delayed", "error", "late" }) do
   states, results, output, screen = check("panes", "tab",
-    { "label", "\12", "\21beta", "\16", "\r", "\26", "", "", "", "\r" }, nil, mode)
-  assert(results[1].query == "beta" and results[1].selected_id == "b" and not results[1].target, output)
+    { "label", "\12", "\21beta", "\16", "", "\26", "", "", "", "\r" }, nil, mode)
+  assert(results[1].query == "beta" and results[1].selected_id == "b" and results[1].target == "b", output)
   assert(states[2].entry == "b" and not states[2].visible and results[2].target == "b", output)
   if mode ~= "error" then assert(output:find("CANCELLED", 1, true), output) end
   if mode == "late" then
@@ -146,7 +146,7 @@ states, results, output, screen = check("panes", "tab", { "\12", "\12", "\r" },
 assert(results[1].target == "b" and screen:find("): close", 1, true), output)
 states, results, output = check("tabs", "tab", { "beta", "\12", "\24", "\1", "\r" }, nil, "delayed")
 assert(#states == 2 and states[2].chosen == "space" and results[1].selected_id == "b"
-  and not results[1].target and output:find("CANCELLED", 1, true), output)
+  and results[1].target == "b" and output:find("CANCELLED", 1, true), output)
 states, results, output = check("panes", "tab", { "\3" }, '{"keys":{"close":["ctrl-c"],"scope_tab":[]}}')
 assert(#states == 1 and not output:find("FOCUS ", 1, true), output)
 print("Unified real fzf: fallback replacement, zero matches, empty/hidden headers, remaps/no-ops and scope loading/error/restoration/late-result races OK")

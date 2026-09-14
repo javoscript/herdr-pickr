@@ -46,6 +46,28 @@ equal(themes.fzf(themes.resolve(nil, { annotation = "red" }).background), "#1818
 print("Themes: canonical inventory, role coverage, RGB/ANSI/default serialization and validation OK")
 
 local config, keymap, json = require("pickr.config"), require("pickr.keymap"), require("pickr.vendor.json")
+for _, text in ipairs({ '{}', '{"refresh":null}', '{"refresh":{}}',
+  '{"refresh":{"interval_ms":null}}', '{"refresh":{"interval_ms":0}}' }) do
+  equal(config.decode(text).refresh.interval_ms, 0)
+end
+for _, interval in ipairs({ 1, 1000, 2147483647 }) do
+  local settings = config.decode('{"refresh":{"interval_ms":' .. interval
+    .. '},"keys":{"refresh":[]},"preview":{"enabled_by_default":false}}')
+  equal(settings.refresh.interval_ms, interval)
+  equal(#settings.keymap.keys.refresh, 0)
+  equal(settings.preview.enabled_by_default, false)
+  equal(config.owner({ getenv = function() return config.snapshot(settings) end }).refresh.interval_ms, interval)
+end
+for _, value in ipairs({ '-1', '1.5', '2147483648', 'true', '"1000"', '[]', '{}' }) do
+  fails(function() config.decode('{"refresh":{"interval_ms":' .. value .. '}}') end, "refresh.interval_ms")
+end
+for _, value in ipairs({ '0', 'false', '"1000"', '[]' }) do
+  fails(function() config.decode('{"refresh":' .. value .. '}') end, "refresh")
+end
+fails(function() config.decode('{"refresh":{"typo":null}}') end, "refresh.typo")
+for _, value in ipairs({ "1e999", "-1e999" }) do
+  fails(function() config.decode('{"refresh":{"interval_ms":' .. value .. '}}') end, "refresh.interval_ms")
+end
 for _, text in ipairs({ "{}", '{"keys":null,"theme":null}',
   '{"keys":{"refresh":null},"theme":{"name":null,"custom":{"annotation":null}}}',
   '{"theme":{"custom":null}}' }) do
@@ -115,10 +137,16 @@ local deps = { getenv = function(key) return env[key] end,
   end }
 equal(config.load(deps).theme_name, "catppuccin")
 equal(reads, 1)
+equal(config.load(deps).refresh.interval_ms, 0)
 deps.read_file = function() return nil, "permission denied", "EACCES" end
 fails(function() config.load(deps) end, "/fixture settings/config.json: permission denied")
 deps.read_file = function() return '{"theme":{"name":"typo"}}' end
 fails(function() config.load(deps) end, "/fixture settings/config.json: theme.name")
+for _, value in ipairs({ '-1', '1.5', '2147483648', 'true', '"1000"', '[]', '{}', '1e999' }) do
+  deps.read_file = function() return '{"refresh":{"interval_ms":' .. value .. '}}' end
+  fails(function() config.load(deps) end, "/fixture settings/config.json:")
+  fails(function() config.load(deps) end, "refresh.interval_ms")
+end
 deps.read_file = function() return '{"theme":' end
 fails(function() config.load(deps) end, "/fixture settings/config.json:")
 equal(json.decode('{"a":null}').a, nil)
@@ -235,20 +263,21 @@ for _, fixture in ipairs(invalid_prompts) do
 end
 print("Configuration: prompt inheritance, four types, literal/empty strings and field/path diagnostics OK")
 
-local contents = '{"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120,"show_hints":false},'
+local contents = '{"refresh":{"interval_ms":1000},"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120,"show_hints":false},'
   .. '"prompt":{"default":"Original: ","variants":{"spaces":"","agents":"Agents: "}}}'
 local loads = 0
 local launch_deps = { getenv = function(key) return env[key] end,
   read_file = function() loads = loads + 1; return contents end }
 local launched = config.load(launch_deps)
 local handoff = config.snapshot(launched)
-contents = '{"theme":{"name":"rose-pine"},"preview":{"enabled_by_default":false},'
+contents = '{"refresh":{"interval_ms":2147483647},"theme":{"name":"rose-pine"},"preview":{"enabled_by_default":false},'
   .. '"prompt":{"default":"Edited: ","variants":{"spaces":"Spaces: ","agents":"New agents: "}}}'
 local owner = config.owner({ getenv = function(key)
   equal(key, "PICKR_SETTINGS_SNAPSHOT"); return handoff
 end, read_file = function() error("Owner must not reread launcher settings") end })
 equal(loads, 1)
 equal(owner.theme_name, "terminal")
+equal(owner.refresh.interval_ms, 1000)
 equal(owner.popup.width, 120)
 equal(owner.popup.show_hints, false)
 equal(#owner.keymap.keys.refresh, 0)
@@ -259,6 +288,7 @@ for variant in pairs(keymap.variants) do
 end
 local reopened = config.owner(launch_deps)
 equal(reopened.theme_name, "rose-pine")
+equal(reopened.refresh.interval_ms, 2147483647)
 equal(reopened.popup.show_hints, true)
 equal(reopened.prompt.default, "Edited: ")
 equal(reopened.prompt.variants.tabs, "Edited: ")
@@ -266,6 +296,19 @@ equal(reopened.prompt.variants.spaces, "Spaces: ")
 equal(reopened.prompt.variants.agents, "New agents: ")
 equal(loads, 2)
 local mutations = {
+  function(s) s.refresh = nil end,
+  function(s) s.refresh = false end,
+  function(s) s.refresh = json.null end,
+  function(s) s.refresh = setmetatable({}, json.array) end,
+  function(s) s.refresh.interval_ms = nil end,
+  function(s) s.refresh.interval_ms = -1 end,
+  function(s) s.refresh.interval_ms = 1.5 end,
+  function(s) s.refresh.interval_ms = 2147483648 end,
+  function(s) s.refresh.interval_ms = "1000" end,
+  function(s) s.refresh.interval_ms = false end,
+  function(s) s.refresh.interval_ms = json.null end,
+  function(s) s.refresh.interval_ms = {} end,
+  function(s) s.refresh.typo = true end,
   function(s) s.popup.show_hints = nil end,
   function(s) s.popup.show_hints = "false" end,
   function(s) s.prompt = nil end,

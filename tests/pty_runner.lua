@@ -107,10 +107,23 @@ function M.run(argv, env, keys, input, timeout)
     key_timer:start(800, 200, function()
       -- Detect premature command exit even if script is still draining its PTY.
       if uv.fs_stat(root .. "/result") or exited then close(key_timer); return end
-      if sent == #keys then close(key_timer); return end
+      if sent == #keys then
+        -- Native fzf tracking can ignore a closing key during replacement.
+        -- Live-update fixtures can explicitly retry only their final key.
+        local final = keys[sent]
+        if type(final) == "table" then
+          stdin:write(final.retry, function(write_error) if write_error then fail(write_error) end end)
+        else close(key_timer) end
+        return
+      end
       sent = sent + 1
-      if keys[sent] ~= "" then
-        stdin:write(keys[sent], function(write_error) if write_error then fail(write_error) end end)
+      local key = keys[sent]
+      if type(key) == "table" then
+        assert(sent == #keys and type(key.retry) == "string", "only the final key can be retried")
+        key = key.retry
+      end
+      if key ~= "" then
+        stdin:write(key, function(write_error) if write_error then fail(write_error) end end)
       end
     end)
     deadline = uv.new_timer()

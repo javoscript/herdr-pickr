@@ -259,7 +259,7 @@ local function parse_string(str, i)
 end
 
 
-local function parse_number(str, i, strict)
+local function parse_number(str, i, strict, path)
   local x = next_char(str, i, delim_chars)
   local s = str:sub(i, x - 1)
   local n = tonumber(s)
@@ -274,7 +274,7 @@ local function parse_number(str, i, strict)
       or n == math.huge or n == -math.huge then n = nil end
   end
   if not n then
-    decode_error(str, i, "invalid number '" .. s .. "'")
+    decode_error(str, i, (strict and path and path .. ": " or "") .. "invalid number '" .. s .. "'")
   end
   return n, x
 end
@@ -291,7 +291,7 @@ local function parse_literal(str, i, strict)
 end
 
 
-local function parse_array(str, i, strict)
+local function parse_array(str, i, strict, path)
   local res = strict and setmetatable({}, json.array) or {}
   local n = 1
   i = i + 1
@@ -304,7 +304,7 @@ local function parse_array(str, i, strict)
       break
     end
     -- Read token
-    x, i = parse(str, i, strict)
+    x, i = parse(str, i, strict, path and path .. "[" .. n .. "]")
     res[n] = x
     n = n + 1
     -- Next token
@@ -321,7 +321,7 @@ local function parse_array(str, i, strict)
 end
 
 
-local function parse_object(str, i, strict)
+local function parse_object(str, i, strict, path)
   local res = strict and setmetatable({}, json.object) or {}
   i = i + 1
   while 1 do
@@ -344,7 +344,7 @@ local function parse_object(str, i, strict)
     end
     i = next_char(str, i + 1, space_chars, true)
     -- Read value
-    val, i = parse(str, i, strict)
+    val, i = parse(str, i, strict, path and path .. "." .. key or key)
     -- Set
     res[key] = val
     -- Next token
@@ -382,11 +382,11 @@ local char_func_map = {
 }
 
 
-parse = function(str, idx, strict)
+parse = function(str, idx, strict, path)
   local chr = str:sub(idx, idx)
   local f = char_func_map[chr]
   if f then
-    return f(str, idx, strict)
+    return f(str, idx, strict, path)
   end
   decode_error(str, idx, "unexpected character '" .. chr .. "'")
 end

@@ -41,7 +41,7 @@ local root, action, launch_mode, kind, scope = table.unpack(arg, 1, 5)
 package.path = root .. "/src/?.lua;" .. package.path
 local runtime, config, core = require("pickr.runtime"), require("pickr.config"), require("pickr.core")
 local settings = config.decode('{"popup":{"width":101,"height":"83%","show_hints":false},'
-  .. '"preview":{"enabled_by_default":false},"theme":{"name":"terminal"},'
+  .. '"refresh":{"interval_ms":1000},"preview":{"enabled_by_default":false},"theme":{"name":"terminal"},'
   .. '"prompt":{"variants":{"panes":"Splits: "}},'
   .. '"columns":{"panes":["pane"]},"keys":{"panes":["alt-9"]}}')
 local env = { HERDR_ENV = "1", HERDR_PLUGIN_ID = "javoscript.herdr-pickr",
@@ -71,6 +71,7 @@ runtime.run_picker = function(_, args, _, _, session)
   local s = session.settings
   assert(s.popup.width == 101 and s.popup.height == "83%" and not s.popup.show_hints)
   assert(s.theme_name == "terminal" and not session.popup.preview_visible)
+  assert(s.refresh.interval_ms == 1000)
   assert(s.keymap.keys.panes[1] == "alt-9" and s.columns.panes[1] == "pane")
   if kind == "panes" then
     local found = false

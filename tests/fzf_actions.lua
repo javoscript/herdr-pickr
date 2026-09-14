@@ -374,11 +374,11 @@ print("Real fzf memory: fresh identity/order/preview, deleted/filtered/empty fal
 for _, mode in ipairs({ "memory-loading", "memory-error" }) do
   for _, query in ipairs({ "renamed", "fixture", "nomatch" }) do
     local _, output = check("tabs", "all", memory_settings,
-      { "label", "\27[B", "\12", "\21" .. query, "\16", "\r", "\19", "\20", "",
+      { "label", "\27[B", "\12", "\21" .. query, "\16", "", "\19", "\20", "",
         query == "nomatch" and "\19" or "\r", query == "nomatch" and "\27" or nil },
       query ~= "nomatch", nil, query == "renamed" and "fixture-next" or "fixture-id", mode)
     local exits = results(output)
-    assert(exits[1].query == query and exits[1].selected_id == "fixture-next" and not exits[1].target)
+    assert(exits[1].query == query and exits[1].selected_id == (query == "fixture" and "fixture-id" or nil))
     assert(exits[3].query == query)
     assert(exits[3].selected_id == (query == "renamed" and "fixture-next" or query == "fixture" and "fixture-id" or nil))
     if mode == "memory-loading" then assert(output:find("CANCELLED", 1, true), output) end
@@ -458,10 +458,10 @@ end
 for index, mode in ipairs({ "memory-loading", "memory-error" }) do
   local scope, back = table.unpack(pane_scopes[index])
   local _, output = check("panes", scope, {},
-    { "label", "\27[B", "\12", "\21renamed", "\16", "\r", "\19", back, "", "\r" },
+    { "label", "\27[B", "\12", "\21renamed", "\16", "", "\19", back, "", "\r" },
     true, nil, "fixture-next", mode)
   local exits, launches = results(output), entries(output)
-  assert(exits[1].query == "renamed" and exits[1].selected_id == "fixture-next" and not exits[1].target)
+  assert(exits[1].query == "renamed" and not exits[1].selected_id and not exits[1].target)
   assert(exits[3].query == "renamed" and exits[3].target == "fixture-next")
   assert(not launches[2].visible and not launches[3].visible)
   if mode == "memory-loading" then assert(output:find("CANCELLED", 1, true)) end

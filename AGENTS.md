@@ -5,8 +5,6 @@
 Pickr is a local Herdr plugin that provides fuzzy tab, space, and agent pickers
 with terminal previews. It uses Lua 5.3+, `luv`, and `fzf` from PATH.
 
-See `README.md` for usage, project structure, and regression-check instructions.
-
 ## Language Guidelines
 
 - Prefer Lua for all project code, including scripts, tooling, and tests.
@@ -16,6 +14,8 @@ See `README.md` for usage, project structure, and regression-check instructions.
 - After making changes to the codebase, review and update `README.md` as needed
   to keep installation, configuration, feature highlights and usage instructions
   accurate.
+- Keep `README.md` content targeted for the user's reference to see how to use
+  the plugin. Don't include technical or development-related content in the readme.
 
 ## Commit Guidelines
 

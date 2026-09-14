@@ -790,15 +790,17 @@ do
   equal(session.state, "ready")
   equal(session:accept(rows[1]), "one")
   local generation = session:begin_refresh("one")
-  equal(session.state, "loading")
-  assert(not session:accept(rows[1]))
+  equal(session.state, "ready")
+  equal(session.refresh_state, "fetching")
+  equal(session:accept(rows[1]), "one")
   assert(not session:begin_refresh("two"))
-  equal(session.saved_id, "one")
+  equal(session.saved_id, nil)
   assert(session:fail(generation))
-  equal(session.state, "error")
-  assert(not session:accept(rows[1]))
+  equal(session.state, "ready")
+  equal(session.refresh_state, "error")
+  equal(session:accept(rows[1]), "one")
   local retry = session:begin_refresh(nil)
-  equal(session.saved_id, "one")
+  equal(session.saved_id, nil)
   assert(not session:publish(generation, rows, "old header"))
   assert(session:publish(retry, { "two\tnew-preview\tsecond", "one\tnew-preview\tnew label" }, "new header"))
   equal(session:accept("one\tnew-preview\tnew label"), "one")
@@ -833,12 +835,19 @@ do
   assert(not runtime.picker_result("", session).target)
   session.has_expect = true
   local generation = session:begin_refresh("one")
-  for _, state in ipairs({ "loading", "error" }) do
+  for _, state in ipairs({ "fetching", "error" }) do
     if state == "error" then assert(session:fail(generation)) end
     result = runtime.picker_result(query .. "\0ctrl-s\0@loading\t-\tLoading\0", session)
-    equal(result.selected_id, "one")
+    equal(result.selected_id, nil)
     assert(not result.target)
+    result = runtime.picker_result(query .. "\0ctrl-s\0" .. row .. "\0", session)
+    equal(result.selected_id, "one")
+    equal(result.target, "one")
   end
+  session.state, session.saved_id = "loading", "one"
+  result = runtime.picker_result(query .. "\0ctrl-s\0", session)
+  equal(result.selected_id, "one")
+  assert(not result.target)
   session:close()
   assert(not runtime.picker_result("\0\0" .. row .. "\0", session).selected_id)
 end
@@ -1062,7 +1071,7 @@ core.snapshot_candidates = snapshot_candidates
 dofile(directory .. "/themed_rendering.lua")
 dofile(directory .. "/documentation.lua")
 -- Separate Lua processes keep fixture overrides isolated from real PTY checks.
-for _, name in ipairs({ "pane_launch.lua", "panes.lua", "columns.lua", "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua", "unified_fzf.lua" }) do
+for _, name in ipairs({ "pane_launch.lua", "panes.lua", "columns.lua", "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua", "unified_fzf.lua", "live_snapshots.lua", "live_refresh.lua" }) do
   local code, output, errors = require("pickr.process").run(assert(uv.exepath()),
     { directory .. "/" .. name }, nil, runtime.fzf_env(), 600000)
   io.write(output)

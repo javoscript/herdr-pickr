@@ -13,6 +13,12 @@ local defaults = config.decode("{}")
 local example = assert(readme:match("complete default configuration:.-```json\n(.-)\n```"))
 local documented = config.decode(example)
 local raw = require("pickr.vendor.json").decode(example, true)
+assert(raw.refresh and raw.refresh.interval_ms == 0, "missing disabled-by-default refresh interval")
+assert(documented.refresh.interval_ms == defaults.refresh.interval_ms)
+for _, text in ipairs({ "`refresh.interval_ms`", "2147483647", "Keystrokes during this final replacement can be ignored",
+  "returns the preview to the top", "Close and reopen Pickr to apply interval edits" }) do
+  assert(readme:find(text, 1, true), "missing live-refresh documentation: " .. text)
+end
 for _, action in ipairs(require("pickr.keymap").order) do
   assert(raw.keys[action], "missing default key setting: " .. action)
   assert(table.concat(documented.keymap.keys[action], ",") == table.concat(defaults.keymap.keys[action], ","))

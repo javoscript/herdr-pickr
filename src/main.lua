@@ -4,7 +4,13 @@ local directory = assert(script:match("^(.*)/[^/]+$"))
 package.path = directory .. "/?.lua;" .. package.path
 
 if arg[1] == "preview" and arg[2] and not arg[3] then
-  io.write(require("pickr.core").preview(arg[2]))
+  local owner = os.getenv("PICKR_PREVIEW_SOCKET")
+  if owner then
+    local ok, content = pcall(require("pickr.runtime").control_helper, owner, "preview", arg[2])
+    io.write(ok and content or "Preview unavailable: pane closed or could not be read.\n")
+  else
+    io.write(require("pickr.core").preview(arg[2]))
+  end
   return
 end
 

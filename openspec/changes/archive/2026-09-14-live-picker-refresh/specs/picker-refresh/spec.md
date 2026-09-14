@@ -1,10 +1,11 @@
-# picker-refresh Specification
+## RENAMED Requirements
 
-## Purpose
+- FROM: `### Requirement: Loading replaces selectable results`
+- TO: `### Requirement: Background refresh retains usable displayed results`
+- FROM: `### Requirement: Refresh failure is retryable without stale candidates`
+- TO: `### Requirement: Refresh failure retains usable results and supports retry`
 
-Let users refresh open pickers on demand to see current statuses and metadata while retaining their search, preview visibility, and selection context.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Manual refresh is available in every picker
 
@@ -170,6 +171,8 @@ Panes at every scope SHALL share query/preview-preserving background refresh, us
 - **WHEN** refresh keys and ticks recur while pane refresh is pending and the popup closes
 - **THEN** only one refresh request runs and it is cancelled without waiting for the fetch timeout, with any final-publication input wait bounded by the publication deadline
 - **AND** no pane is focused
+
+## ADDED Requirements
 
 ### Requirement: Automatic refresh follows the configured session interval
 
