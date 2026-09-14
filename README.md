@@ -110,6 +110,16 @@ Install from [GitHub](https://github.com/javoscript/herdr-pickr):
 herdr plugin install javoscript/herdr-pickr
 ```
 
+The unpinned command installs the latest default-branch code. To install this
+release explicitly:
+
+```sh
+herdr plugin install javoscript/herdr-pickr --ref v0.2.0
+```
+
+Reinstalling preserves your plugin configuration and state. See
+[CHANGELOG.md](CHANGELOG.md) for release notes and migration highlights.
+
 ### 3. Open a picker
 
 From a terminal **inside Herdr**, open the current-space tabs picker:
@@ -437,6 +447,8 @@ the first row, the four type shortcuts the second; long rows clip rather than wr
   `tabs-space`, `panes-space`, and `agents-space`, then reload Herdr. The old
   `-current` registrations have been removed without compatibility aliases.
   Direct `current` scope arguments likewise become `space`.
+- For direct launches, replace `lua src/main.lua workspaces all` with
+  `lua src/main.lua spaces`.
 - Under `keys`, `columns`, and `prompt.variants`, manually consolidate
   `tabs_current`/`tabs_all` into `tabs`, `agents_current`/`agents_all` into `agents`,
   and `panes_tab`/`panes_current`/`panes_all` into `panes`. Old leaves are rejected
