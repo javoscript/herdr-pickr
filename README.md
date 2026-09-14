@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="#pickr-in-action">In action</a> ·
   <a href="#installation">Installation</a> ·
   <a href="#configuration">Configuration</a> ·
   <a href="#themes-and-custom-colors">Themes</a> ·
@@ -28,29 +29,39 @@
 
 ---
 
-## Theme spotlight
+## Pickr in action
 
-Click a screenshot to view it full-size. These examples use a [custom prompt](#search-prompt).
+Click any image to view it full-size.
+
+<p align="center">
+  <a href="docs/images/agents-all.png"><img src="docs/images/agents-all.png" alt="Agents across all spaces, showing attention statuses and a working agent in the preview" width="960"></a>
+  <br>See which agents need you, and inspect their work before switching.
+  <br><strong>Agents / All spaces</strong> · Showcased theme: <code>rose-pine</code>
+</p>
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <a href="docs/images/catppuccin.png"><img src="docs/images/catppuccin.png" alt="Pickr showing searchable tabs and a terminal preview in the Catppuccin Mocha theme" width="480"></a>
-      <br><code>catppuccin</code> (Mocha) · Current-space tabs
+      <a href="docs/images/spaces-worktrees.png"><img src="docs/images/spaces-worktrees.png" alt="Spaces grouped with related worktrees, showing project paths and tab counts without an effective scope" width="480"></a>
+      <br>Keep projects and their worktrees together while moving between spaces.
+      <br><strong>Spaces / No scope</strong> · Showcased theme: <code>catppuccin</code> (Mocha)
     </td>
     <td align="center" width="50%">
-      <a href="docs/images/rose-pine.png"><img src="docs/images/rose-pine.png" alt="Pickr showing searchable tabs and a terminal preview in the Rosé Pine theme" width="480"></a>
-      <br><code>rose-pine</code> · Current-space tabs
+      <a href="docs/images/panes-all.png"><img src="docs/images/panes-all.png" alt="Panes in all spaces" width="480"></a>
+      <br>Find the right terminal across every project, with a preview before you jump.
+      <br><strong>Panes / All spaces</strong> · Showcased theme: <code>gruvbox</code>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <a href="docs/images/solarized.png"><img src="docs/images/solarized.png" alt="Pickr showing searchable tabs and a terminal preview in the Solarized theme" width="480"></a>
-      <br><code>solarized</code> · Current-space tabs
+      <a href="docs/images/tabs-space.png"><img src="docs/images/tabs-space.png" alt="Tabs in this space" width="480"></a>
+      <br>Search your project's tabs without losing the context of where you started.
+      <br><strong>Tabs / This space</strong> · Showcased theme: <code>solarized</code>
     </td>
     <td align="center" width="50%">
-      <a href="docs/images/gruvbox.png"><img src="docs/images/gruvbox.png" alt="Pickr showing searchable agents and a terminal preview in the Gruvbox theme" width="480"></a>
-      <br><code>gruvbox</code> · All-spaces agents
+      <a href="docs/images/panes-tab.png"><img src="docs/images/panes-tab.png" alt="Panes in this tab" width="480"></a>
+      <br>Jump straight to the editor, tests, or logs in your current tab.
+      <br><strong>Panes / This tab</strong> · Showcased theme: <code>rose-pine</code>
     </td>
   </tr>
 </table>
@@ -131,18 +142,16 @@ preview or a focus error rather than selecting a different terminal.
 
 ## Configuration
 
-<p align="center">
-  <a href="#herdr-keybindings">Keybindings</a> ·
-  <a href="#pickr-configuration-file">Configuration file</a> ·
-  <a href="#popup-action-keys">Action keys</a> ·
-  <a href="#keyboard-hints">Hints</a> ·
-  <a href="#displayed-columns">Columns</a> ·
-  <a href="#popup-size">Popup size</a> ·
-  <a href="#initial-preview-visibility">Preview</a> ·
-  <a href="#themes-and-custom-colors">Themes</a> ·
-  <a href="#search-prompt">Search prompt</a> ·
-  <a href="#fzf-compatibility-and-inherited-bindings">fzf compatibility</a>
-</p>
+- [Keybindings](#herdr-keybindings)
+- [Configuration file](#pickr-configuration-file)
+- [Action keys](#popup-action-keys)
+- [Hints](#keyboard-hints)
+- [Columns](#displayed-columns)
+- [Popup size](#popup-size)
+- [Preview](#initial-preview-visibility)
+- [Themes](#themes-and-custom-colors)
+- [Search prompt](#search-prompt)
+- [fzf compatibility](#fzf-compatibility-and-inherited-bindings)
 
 ### Herdr keybindings
 
