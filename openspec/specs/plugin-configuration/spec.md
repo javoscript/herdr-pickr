@@ -22,7 +22,7 @@ Pickr SHALL read an optional `config.json` from its Herdr-managed plugin configu
 
 ### Requirement: Partial configuration preserves defaults and validates overrides
 
-Configuration SHALL be a JSON object with optional `keys`, `theme`, `preview`, `popup`, `prompt`, and `columns` objects. Omitted or null settings SHALL retain their defaults, with omitted or null variant prompts inheriting the resolved global prompt and omitted or null variant column lists retaining that variant's default columns. Missing files SHALL silently use defaults. Unreadable discovered files, malformed JSON, wrong types, unknown settings, invalid keymaps, invalid theme settings, invalid prompt settings, and invalid column settings SHALL produce an actionable diagnostic identifying the location or setting and prevent opening a misconfigured picker. Directory-discovery failure SHALL produce an actionable diagnostic rather than reading an assumed path.
+Configuration SHALL be a JSON object with optional `keys`, `theme`, `preview`, `popup`, `prompt`, and `columns` objects. Omitted/null settings SHALL retain defaults; omitted/null type prompts SHALL inherit the global prompt and type column lists SHALL retain that type's defaults. Missing files SHALL silently use defaults. Unreadable discovered files, malformed JSON, wrong types, unknown settings, and invalid keymap/theme/prompt/column values SHALL identify the file/setting and prevent a misconfigured launch. Directory-discovery failure SHALL report an actionable diagnostic rather than reading an assumed path. Removed scope-specific settings SHALL use migration diagnostics without silently choosing between old overrides.
 
 #### Scenario: Minimal override
 - **WHEN** configuration changes only the refresh action
@@ -36,7 +36,7 @@ Configuration SHALL be a JSON object with optional `keys`, `theme`, `preview`, `
 #### Scenario: No configuration file
 - **WHEN** the resolved config directory has no `config.json`
 - **THEN** Pickr opens with its default actions and Catppuccin theme without creating a file
-- **AND** every variant uses the prompt `"Search: "` and all its existing columns in their default order
+- **AND** every type uses the prompt `"Search: "` and its complete default columns at every scope
 
 #### Scenario: Null retains defaults rather than disabling a shortcut
 - **WHEN** `keys.refresh` is `null` and `theme.name` is `null`
@@ -55,11 +55,11 @@ Configuration SHALL be a JSON object with optional `keys`, `theme`, `preview`, `
 
 ### Requirement: Initial preview visibility is configurable
 
-Pickr SHALL expose `preview.enabled_by_default` as a boolean defaulting to `true` when omitted or null. A new popup session, or a new direct `src/main.lua` invocation, SHALL start with this configured preview visibility regardless of its initial variant. Any enabled preview-toggle shortcut SHALL remain usable in either initial state. Variant switches, refresh, and retry SHALL preserve the current shown/hidden state, including changes made using that shortcut. The configured default SHALL NOT be reapplied on a variant switch. Closing SHALL discard the session's visibility state; reopening SHALL initialize visibility from the configured default again. Unknown preview settings and nonboolean non-null values SHALL block launch with a file/field diagnostic.
+`preview.enabled_by_default` SHALL be a boolean defaulting to true when omitted/null. Every new popup/direct picker session SHALL initialize from it, regardless of initial type/scope/preset. Enabled preview toggling SHALL work in either state; type/scope changes, refresh, and retry SHALL preserve the current visibility rather than reapplying the default. Closing SHALL discard this state and reopening SHALL use current configuration. Unknown preview settings and nonboolean non-null values SHALL block launch with a file/field diagnostic.
 
 #### Scenario: Preview starts hidden
 - **WHEN** `preview.enabled_by_default` is `false`
-- **THEN** the preview is hidden when opening a new popup session with any of the five variants
+- **THEN** the preview is hidden when opening a new popup session with any type/preset
 - **AND** the configured preview-toggle shortcut can show and hide it
 - **AND** variant switches, refresh, and retry preserve its current visibility
 
@@ -88,7 +88,7 @@ Pickr SHALL expose `preview.enabled_by_default` as a boolean defaulting to `true
 
 ### Requirement: Configuration is stable for one popup launch
 
-Pickr SHALL resolve settings once per popup launch. Pickr action launches and `src/open.lua` SHALL resolve settings before popup creation and hand the same settings snapshot to the picker owner. Direct Herdr pane launches and `src/main.lua` SHALL resolve settings in the picker owner. Variant switches, refreshes, retry messages, and rendering SHALL use that same configuration until the popup closes. A subsequent launch SHALL read current settings.
+Pickr SHALL resolve settings once per popup launch. Action launches and `src/open.lua` SHALL resolve before popup creation and hand the same settings snapshot to the owner. Direct Herdr pane launches and direct picker invocation SHALL resolve in the owner. Type/scope changes, refresh/retry, messages, and rendering SHALL use the same settings until closing. A later launch SHALL read current settings. Incompatible settings handoffs SHALL fail clearly rather than mixing old and new schemas or rereading config silently.
 
 #### Scenario: Edit while popup is open
 - **WHEN** the user edits configuration and then refreshes or switches variants in an existing popup
@@ -100,15 +100,17 @@ Pickr SHALL resolve settings once per popup launch. Pickr action launches and `s
 - **THEN** popup dimensions and picker behavior use the launcher's single settings snapshot
 - **AND** a subsequent launch adopts the edited configuration
 
+#### Scenario: Incompatible settings handoff
+- **WHEN** the owner receives a settings snapshot from the old scope-specific schema
+- **THEN** it reports an incompatible handoff rather than partially launching
+
 ### Requirement: Action-launched popup dimensions are configurable
 
-Pickr SHALL expose `popup.width` and `popup.height`, defaulting independently to `"80%"` and `"70%"` when omitted or null. Each dimension SHALL accept a nonnegative finite integer terminal-cell count or an integer percentage string from `"1%"` through `"100%"`. Pickr SHALL cap cell counts above 65535 at 65535 during configuration resolution, including in the launch settings snapshot. Cell counts SHALL describe the outer popup including its border. Herdr SHALL perform minimum-size and available-screen clamping. Unknown popup settings, wrong types, malformed or out-of-range percentages, and negative, non-finite or fractional numbers SHALL block launch with a file/field diagnostic.
-
-Pickr's five actions and `src/open.lua` SHALL supply configured dimensions when creating a popup through Herdr's `plugin.pane.open` socket API. Direct `herdr plugin pane open` calls SHALL retain the manifest's 80% width and 70% height defaults; `src/main.lua` SHALL use its existing terminal without resizing it. Variant switching and refresh SHALL retain the existing popup geometry. Reopening through Pickr's launcher SHALL adopt edited dimensions.
+`popup.width` and `popup.height` SHALL independently default to `80%` and `70%` when omitted/null. Each SHALL accept a nonnegative finite integer cell count or integer percentage string from `1%` to `100%`; cell counts above 65535 SHALL cap at 65535 in resolution and handoff. Counts SHALL include the outer border, with Herdr applying minimum/available-screen clamping. Wrong types, unknown popup fields, malformed/out-of-range percentages, and negative/non-finite/fractional counts SHALL block launch with a file/field diagnostic. All twelve action presets and `src/open.lua` SHALL use configured dimensions through the popup API. Direct Herdr pane entrypoints SHALL retain manifest 80%/70% defaults and direct picker invocation SHALL not resize its terminal. Transitions/refresh SHALL keep existing geometry; reopening SHALL adopt edits.
 
 #### Scenario: Partial popup override
 - **WHEN** `popup.width` is `"90%"` and height is omitted or null
-- **THEN** each of the five Pickr actions requests a popup with width `"90%"` and height `"70%"`
+- **THEN** each of the twelve Pickr actions requests a popup with width `"90%"` and height `"70%"`
 
 #### Scenario: Terminal-cell dimensions
 - **WHEN** `popup.width` is `120` and `popup.height` is `30`
@@ -136,26 +138,24 @@ Pickr's five actions and `src/open.lua` SHALL supply configured dimensions when 
 
 ### Requirement: Search prompt supports a global default and variant overrides
 
-Pickr SHALL accept `prompt.default` as global prompt text and `prompt.variants` as an object with optional `tabs_current`, `tabs_all`, `spaces`, `agents_current`, `agents_all`, `panes_tab`, `panes_current`, and `panes_all` prompt strings. The global default SHALL be exactly `"Search: "`, including its trailing space, when `prompt` or `prompt.default` is omitted or null. No variant SHALL have a built-in override. When `prompt.variants` or an individual override is omitted or null, that variant SHALL inherit the resolved global prompt. A non-null variant override SHALL take precedence over the global value.
-
-Prompt values SHALL be strings, including empty strings, and SHALL preserve whitespace and Unicode without trimming or adding a separator. Strings containing NUL, carriage return, or newline SHALL be rejected. Wrong types and unknown prompt fields or variant names SHALL block launch with a file/field diagnostic, including invalid overrides for variants other than the initial one. Prompt text SHALL be passed as text rather than evaluated as shell commands or fzf actions. Prompt coloring SHALL continue to follow the existing theme's `prompt` role.
+Pickr SHALL accept `prompt.default` and `prompt.variants` keyed only by `spaces`, `tabs`, `panes`, and `agents`. Global default SHALL be exactly `Search: ` including its trailing space when omitted/null. No type SHALL have a built-in override; omitted/null containers or leaves SHALL inherit the resolved global prompt. A non-null type override, including an empty string, SHALL take precedence and apply at every scope. Strings SHALL preserve whitespace/Unicode literally without evaluation or added separators. NUL/CR/LF, wrong types, and unknown fields/type names SHALL block launch with a file/field diagnostic even for inactive types. Prompt color SHALL use the existing prompt theme role.
 
 #### Scenario: Default prompt in every variant
 - **WHEN** `prompt` is omitted, null, or an empty object
-- **THEN** all eight variants use exactly `"Search: "`
+- **THEN** all four types use exactly `"Search: "` at every scope
 
 #### Scenario: Global customization
 - **WHEN** `prompt.default` is `"Find: "` and `prompt.variants` is omitted or null
-- **THEN** all eight variants use exactly `"Find: "`
+- **THEN** all four types use exactly `"Find: "` at every scope
 
 #### Scenario: Override precedence and inheritance
-- **WHEN** the global prompt is `"Find: "`, `tabs_current` is `"Tabs: "`, `agents_all` is `"Agents: "`, and `spaces` is null in `prompt.variants`
-- **THEN** current-space tabs and all-spaces agents use their respective overrides
-- **AND** spaces, all-spaces tabs, current-space agents, and all three pane variants use `"Find: "`
+- **WHEN** the global prompt is `"Find: "`, tabs is `"Tabs: "`, and spaces is null in `prompt.variants`
+- **THEN** every tab scope uses `"Tabs: "`
+- **AND** Spaces and other unconfigured types use `"Find: "`
 
 #### Scenario: Variant override without a global override
 - **WHEN** `prompt.default` is omitted or null and `prompt.variants.spaces` is `"Spaces: "`
-- **THEN** spaces uses `"Spaces: "` and the other seven variants use `"Search: "`
+- **THEN** Spaces uses `"Spaces: "` and the other three types use `"Search: "`
 
 #### Scenario: Empty strings and literal text
 - **WHEN** a resolved prompt is an empty string or contains Unicode, quotes, shell metacharacters, or surrounding spaces
@@ -168,16 +168,17 @@ Prompt values SHALL be strings, including empty strings, and SHALL preserve whit
 - **AND** no entity is focused
 
 #### Scenario: Independent pane prompts
-- **WHEN** `prompt.variants.panes_tab` is `"Splits: "`, `panes_current` is `"Project: "`, and `panes_all` is null
-- **THEN** the first two pane scopes use their overrides and all-spaces panes inherits the global prompt
+- **WHEN** prompt.variants.panes is `Splits: `
+- **THEN** all pane scopes use that one type prompt; old independent pane-scope overrides require migration
 
 ### Requirement: Prompt selection follows the launch configuration and active variant
 
-All launch paths SHALL use prompts from the same resolved launch settings as other configuration. Switching variants SHALL select the destination variant's effective prompt from those settings, including empty candidate and zero-match states. Refresh loading, success, failure, and retry SHALL retain the active variant's prompt. Edits to prompt configuration SHALL take effect only on a subsequent launch, including edits made between launcher resolution and picker startup. Prompt customization SHALL NOT change per-view query/selection memory on switching or query preservation on refresh.
+All launch paths SHALL use the resolved type prompt from the launch settings. Type changes SHALL select the destination's prompt; scope changes SHALL keep the type prompt. Empty results, refresh loading/success/failure/retry SHALL retain it. Prompt edits SHALL apply only on a subsequent launch. Prompt customization SHALL preserve the agreed per-type query/selection memory, scope-change query continuity, and refresh query preservation.
 
 #### Scenario: Switch selects the destination prompt
-- **WHEN** the user switches between any of the eight variants with different effective prompts
-- **THEN** the destination uses its own effective prompt and remembered query and selection, or first-visit defaults
+- **WHEN** a session changes type and then scope
+- **THEN** the type transition selects the destination prompt and its remembered query/selection or first-visit defaults
+- **AND** the scope transition preserves that prompt and query
 - **AND** the same behavior applies with no candidates or no search matches
 
 #### Scenario: Refresh retains the prompt
@@ -191,18 +192,16 @@ All launch paths SHALL use prompts from the same resolved launch settings as oth
 
 ### Requirement: Popup keyboard hint visibility is configurable
 
-Pickr SHALL expose `popup.show_hints` as a boolean defaulting to `true` when omitted or null, including when `popup` is omitted or null or the configuration file is missing. A value of `false` SHALL hide the entire keyboard hints footer in all five picker variants. Nonboolean non-null values SHALL block launch with a file/field diagnostic. Existing popup dimension defaults and validation SHALL remain unchanged.
-
-All launch paths SHALL use the resolved hint visibility from the same launch settings snapshot as other configuration. Switching variants, refresh loading, success, failure, and retry SHALL retain that visibility. Configuration edits SHALL take effect on the next launch, including edits made between launcher resolution and picker startup. Hiding hints SHALL NOT disable or remap keyboard actions.
+`popup.show_hints` SHALL be a boolean defaulting to true when omitted/null, including missing config or omitted/null popup. False SHALL hide the keyboard footer and scope shortcut text in all four types, but not scope labels, effective/remembered state, or refresh/error messages. Nonboolean non-null values SHALL block launch with a file/field diagnostic. Dimensions SHALL retain independent defaults/validation. All launch paths and subsequent type/scope transitions or refresh/retry SHALL retain launch-snapshot visibility. Edits SHALL take effect on the next launch. Hiding hints SHALL NOT disable/remap actions.
 
 #### Scenario: Default and explicit visible hints
 - **WHEN** `popup.show_hints` is `true`, omitted, or null, or `popup` is omitted or null, or the configuration file is missing
-- **THEN** each picker variant displays its normal grouped footer
+- **THEN** each picker type displays its normal grouped footer and enabled scope key hints
 - **AND** popup dimensions retain their independently resolved values
 
 #### Scenario: Hidden hints across launch paths
 - **WHEN** `popup.show_hints` is `false` and Pickr opens through an action, a direct Herdr pane launch, or direct picker invocation
-- **THEN** the initial variant has no hints section
+- **THEN** the footer and scope key text remain absent while scope state and refresh/error messages remain visible
 - **AND** configured keyboard shortcuts retain their normal behavior
 
 #### Scenario: Visibility is stable until reopening
@@ -217,38 +216,34 @@ All launch paths SHALL use the resolved hint visibility from the same launch set
 
 ### Requirement: Column lists are configurable independently per variant
 
-Pickr SHALL accept a `columns` object keyed by `spaces`, `tabs_current`, `tabs_all`, `agents_current`, `agents_all`, `panes_tab`, `panes_current`, and `panes_all`. Each non-null variant value SHALL be a nonempty JSON array of unique, case-sensitive column-name strings. Each array SHALL replace its variant's complete default list, with array order defining display order. Omitting or setting `columns` or a variant value to null SHALL retain the corresponding defaults; an empty `columns` object SHALL retain all defaults.
+Pickr SHALL accept `columns` keyed only by `spaces`, `tabs`, `panes`, and `agents`. Each non-null value SHALL be a nonempty array of unique case-sensitive column strings replacing that type's whole list in array order. Omitted/null containers/leaves and an empty columns object SHALL retain defaults.
 
 The allowed column names and default order SHALL be:
 
-| Variant | Allowed names in default order |
+| Type | Allowed names in default order |
 | --- | --- |
 | `spaces` | `status`, `space`, `tabs`, `directory` |
-| `tabs_current` | `status`, `tab`, `panes`, `directory` |
-| `tabs_all` | `status`, `space`, `tab`, `panes`, `directory` |
-| `agents_current` | `status`, `tab`, `agent`, `title`, `pane` |
-| `agents_all` | `status`, `space`, `tab`, `agent`, `title`, `pane` |
-| `panes_tab` | `status`, `title`, `pane`, `directory` |
-| `panes_current` | `status`, `tab`, `title`, `pane`, `directory` |
-| `panes_all` | `status`, `space`, `tab`, `title`, `pane`, `directory` |
+| `tabs` | `status`, `space`, `tab`, `panes`, `directory` |
+| `panes` | `status`, `space`, `tab`, `title`, `pane`, `directory` |
+| `agents` | `status`, `space`, `tab`, `agent`, `title`, `pane` |
 
-Unknown variants, unavailable or unknown column names, duplicate names, empty arrays, wrong container types, and non-string array elements including null SHALL block launch with a file/field diagnostic, including invalid values for inactive variants. Action launches SHALL validate before popup creation; direct launches SHALL validate before fzf starts.
+The same list and allowed names SHALL apply at every scope, without automatic hiding. Unknown type/column names, unavailable names, duplicates, empty lists, wrong containers, and non-string/null elements SHALL block all launch paths with a file/field diagnostic, including invalid inactive types. Actions SHALL validate before popup creation; direct launches before fzf.
 
 #### Scenario: Partial column override
-- **WHEN** `columns.tabs_all` is `["tab", "space", "directory"]` and other variants are omitted or null
-- **THEN** all-spaces tabs uses exactly that order and subset
-- **AND** every other variant retains its own default list
+- **WHEN** `columns.tabs` is `["tab", "space", "directory"]` and other values are omitted or null
+- **THEN** both tab scopes use exactly that order and subset
+- **AND** the other three types retain their default lists
 
 #### Scenario: Default containers
 - **WHEN** `columns` is omitted, null, or an empty object
-- **THEN** all eight variants retain every allowed column in its default order
+- **THEN** all four types retain every allowed column in its default order at every scope
 
 #### Scenario: Empty and duplicate arrays
 - **WHEN** a column list is `[]` or `["status", "status"]`
 - **THEN** launch is blocked with a diagnostic identifying the invalid column setting
 
 #### Scenario: Invalid variant or unavailable name
-- **WHEN** configuration contains `columns.tabs_here`, uses `space` in `tabs_current`, uses `directory` in an agent variant, or uses a misspelled or differently cased column name
+- **WHEN** configuration contains `columns.tabs_here`, uses `directory` in Agents, or uses a misspelled or differently cased column name
 - **THEN** launch is blocked with a diagnostic identifying the offending setting or element
 
 #### Scenario: Invalid types
@@ -256,22 +251,21 @@ Unknown variants, unavailable or unknown column names, duplicate names, empty ar
 - **THEN** launch is blocked with a diagnostic identifying the offending setting or element
 
 #### Scenario: Invalid inactive variant
-- **WHEN** a spaces launch has valid spaces columns but an invalid `agents_all` or pane variant column list
+- **WHEN** a Spaces launch has valid Spaces columns but an invalid Agents or Panes column list
 - **THEN** launch is blocked before popup creation for action launches or before fzf starts for direct launches
 - **AND** no entity is focused
 
 #### Scenario: Pane subset and scope-specific columns
-- **WHEN** `columns.panes_all` is `["pane", "directory", "space"]`
-- **THEN** all-spaces panes displays exactly those columns in that order
-- **AND** `tab` or `space` in `panes_tab`, or `space` in `panes_current`, remains an invalid column setting
+- **WHEN** Panes or Agents uses This tab
+- **THEN** space and tab remain valid and visible if included, rather than producing a scope-specific validation error
 
 ### Requirement: Column selection follows the launch configuration and active variant
 
-All launch paths SHALL use column lists from the same resolved launch settings as other configuration. Switching variants SHALL select the destination's effective list from those settings, including empty candidate and zero-match states. Initial rendering, refresh success, and retry success SHALL keep headers, rows, and searchable fields consistent with the active variant's list. Refresh loading, failure, and retry SHALL NOT resolve configuration again. Edits to column settings SHALL take effect only on a subsequent launch, including edits made between launcher resolution and picker startup. Per-view query/selection memory on switching and query preservation on refresh SHALL remain unchanged.
+All launch paths SHALL use the active type's resolved column list from the launch settings. Type changes SHALL select destination columns; scope changes SHALL retain the same list. Headers, rows, and searchable fields SHALL agree during initial display, refreshed/retried publication, and empty/zero-match states. Loading/failure/retry SHALL not reread configuration. Edits SHALL take effect only on subsequent launches. Type changes SHALL restore per-type query/selection memory and scope changes SHALL preserve query and eligible identity; refresh SHALL preserve query.
 
 #### Scenario: Switch selects destination columns
-- **WHEN** a session switches between variants with different column lists
-- **THEN** each destination uses its configured header, row order, and searchable subset and restores its own remembered query and selection or first-visit defaults
+- **WHEN** a session changes to Panes with a custom column subset, then narrows scope
+- **THEN** Panes uses that same header, order, and searchable subset at both scopes
 - **AND** its configured header remains present with no candidates or no search matches
 
 #### Scenario: Refresh and retry retain columns
@@ -286,11 +280,11 @@ All launch paths SHALL use column lists from the same resolved launch settings a
 
 ### Requirement: Pane views share all resolved popup settings
 
-All three pane variants SHALL use the same managed configuration discovery, validation, launch snapshot, theme roles, popup dimensions, initial preview visibility, and hint visibility semantics as the existing views. Pane action launches SHALL validate before creating a popup and use configured dimensions. Direct Herdr pane launches SHALL use the manifest's 80% width and 70% height defaults; direct picker invocation SHALL not resize its terminal. Pane switches and refresh/retry SHALL retain launch settings and current preview visibility without rereading configuration. Omitted pane-specific keys, prompts, and columns SHALL resolve to their defaults or existing inheritance rules, without writing user configuration.
+All pane presets SHALL resolve to the same Panes type settings, using managed config discovery/validation, theme, dimensions, initial preview and hint visibility, and launch-snapshot lifetime shared by all types. Action launches SHALL validate before popup creation and request configured dimensions; direct Herdr pane launches SHALL use manifest 80%/70% dimensions and direct picker invocation SHALL not resize the terminal. Type/scope changes and refresh/retry SHALL retain settings and current preview visibility. Omitted Panes keys/prompts/columns SHALL use defaults/inheritance without writing configuration; legacy scope-specific leaves SHALL require migration.
 
 #### Scenario: Existing configuration gains pane defaults
-- **WHEN** a valid existing config omits all pane variant settings and has no new key conflicts
-- **THEN** the three pane views open with their default keys/columns and inherited global prompt
+- **WHEN** a valid config omits Panes settings and launches any pane preset, then changes after launcher resolution
+- **THEN** Panes uses its default key/columns and inherited prompt with the original launch dimensions/theme/hint/preview settings
 - **AND** Pickr does not add settings to the user's config file
 
 #### Scenario: Pane launch settings handoff
@@ -302,3 +296,15 @@ All three pane variants SHALL use the same managed configuration discovery, vali
 - **WHEN** a pane picker is launched directly through a Herdr pane entrypoint
 - **THEN** it uses manifest dimensions and resolves picker configuration in the owner
 - **AND** direct picker invocation uses its existing terminal dimensions
+
+### Requirement: Legacy scope-specific settings require explicit migration
+
+Pickr SHALL reject `tabs_current`, `tabs_all`, `agents_current`, `agents_all`, `panes_tab`, `panes_current`, and `panes_all` leaves under keys, columns, and prompt.variants, including null values. Diagnostics SHALL name the old field and replacement type field. Key migration diagnostics SHALL explain separate type and scope actions rather than treating old composite shortcuts as equivalent type shortcuts. Conflicting legacy settings SHALL NOT be silently merged or given precedence, even if unified settings also exist. Pickr SHALL NOT rewrite user configuration. Existing unrelated valid settings SHALL retain their semantics; users SHALL explicitly resolve new effective key conflicts such as Ctrl+C on both close and scope_tab.
+
+#### Scenario: Conflicting old lists
+- **WHEN** config contains different tabs_current and tabs_all column arrays
+- **THEN** launch reports migration to columns.tabs and chooses neither list automatically
+
+#### Scenario: Legacy null or mixed new and old settings
+- **WHEN** a removed prompt/action/column leaf is null or coexists with its new type field
+- **THEN** the old field still produces a replacement diagnostic without rewriting config

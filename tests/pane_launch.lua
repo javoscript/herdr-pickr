@@ -3,10 +3,11 @@ local root = assert(uv.fs_realpath(arg[0])):match("^(.*)/tests/[^/]+$")
 package.path = root .. "/src/?.lua;" .. package.path
 local process, runtime, json = require("pickr.process"), require("pickr.runtime"), require("pickr.vendor.json")
 local expected = {
-  ["tabs-current"] = { "tabs", "current" }, ["tabs-all"] = { "tabs", "all" },
-  spaces = { "workspaces", "all" }, ["agents-current"] = { "agents", "current" },
+  tabs = { "tabs" }, panes = { "panes" }, agents = { "agents" },
+  ["tabs-space"] = { "tabs", "space" }, ["tabs-all"] = { "tabs", "all" },
+  spaces = { "spaces" }, ["agents-space"] = { "agents", "space" }, ["agents-tab"] = { "agents", "tab" },
   ["agents-all"] = { "agents", "all" }, ["panes-tab"] = { "panes", "tab" },
-  ["panes-current"] = { "panes", "current" }, ["panes-all"] = { "panes", "all" },
+  ["panes-space"] = { "panes", "space" }, ["panes-all"] = { "panes", "all" },
 }
 local file = assert(io.open(root .. "/herdr-plugin.toml"))
 local sections, current = { actions = {}, panes = {} }, nil
@@ -21,7 +22,7 @@ for line in file:lines() do
 end
 file:close()
 for section, entries in pairs(sections) do
-  assert(#entries == 8)
+  assert(#entries == 12)
   local seen = {}
   for _, entry in ipairs(entries) do
     local mode = assert(expected[entry.id])
@@ -41,15 +42,16 @@ package.path = root .. "/src/?.lua;" .. package.path
 local runtime, config, core = require("pickr.runtime"), require("pickr.config"), require("pickr.core")
 local settings = config.decode('{"popup":{"width":101,"height":"83%","show_hints":false},'
   .. '"preview":{"enabled_by_default":false},"theme":{"name":"terminal"},'
-  .. '"prompt":{"variants":{"panes_tab":"Splits: ","panes_current":"Project: ","panes_all":""}},'
-  .. '"columns":{"panes_all":["pane"]},"keys":{"panes_all":["alt-9"]}}')
+  .. '"prompt":{"variants":{"panes":"Splits: "}},'
+  .. '"columns":{"panes":["pane"]},"keys":{"panes":["alt-9"]}}')
 local env = { HERDR_ENV = "1", HERDR_PLUGIN_ID = "javoscript.herdr-pickr",
   HERDR_PLUGIN_CONTEXT_JSON = '{"workspace_id":"origin","tab_id":"A"}' }
 local getenv = os.getenv
 os.getenv = function(key) return env[key] or getenv(key) end
 config.load = function() return settings end
 local snapshot = { workspaces = { { workspace_id = "origin", active_tab_id = "B", tab_count = 0 } },
-  tabs = {}, panes = {}, layouts = {}, agents = {} }
+  tabs = { { workspace_id = "origin", tab_id = "A", pane_count = 0 },
+    { workspace_id = "origin", tab_id = "B", pane_count = 0 } }, panes = {}, layouts = {}, agents = {} }
 runtime.herdr = function(...) assert(select(1, ...) == "api"); return { snapshot = snapshot } end
 runtime.socket_request = function(method, params)
   assert(method == "plugin.pane.open" and params.entrypoint == action)
@@ -69,11 +71,10 @@ runtime.run_picker = function(_, args, _, _, session)
   local s = session.settings
   assert(s.popup.width == 101 and s.popup.height == "83%" and not s.popup.show_hints)
   assert(s.theme_name == "terminal" and not session.popup.preview_visible)
-  assert(s.keymap.keys.panes_all[1] == "alt-9" and s.columns.panes_all[1] == "pane")
-  local titles = { tab = "Panes in this tab", current = "Panes in this space", all = "Panes in all spaces" }
+  assert(s.keymap.keys.panes[1] == "alt-9" and s.columns.panes[1] == "pane")
   if kind == "panes" then
     local found = false
-    for _, option in ipairs(args) do if option == "--border-label=" .. titles[scope] then found = true end end
+    for _, option in ipairs(args) do if option == "--border-label=Panes" then found = true end end
     assert(found)
   end
   return 130, {}, "", 0
@@ -94,8 +95,12 @@ for action, mode in pairs(expected) do
     assert(code == 0 and output:find("LAUNCH OK", 1, true), action .. ": " .. errors)
   end
 end
-for _, kind in ipairs({ "tabs", "agents", "workspaces", "unknown" }) do
+for _, kind in ipairs({ "tabs", "spaces", "workspaces", "unknown" }) do
   local code, _, errors = process.run(uv.exepath(), { root .. "/src/main.lua", kind, "tab" }, nil, runtime.fzf_env(), 5000)
   assert(code == 2 and errors:find("Usage:", 1, true), errors)
 end
-print("Pane launch: eight manifest action/owner mappings, direct dimensions, configured popup/settings handoff, changed startup focus and invalid tab-scoped kinds OK")
+for _, kind in ipairs({ "tabs", "panes", "agents" }) do
+  local code, _, errors = process.run(uv.exepath(), { root .. "/src/main.lua", kind, "current" }, nil, runtime.fzf_env(), 5000)
+  assert(code == 2 and errors:find("use 'space'", 1, true), errors)
+end
+print("Picker launch: twelve manifest action/owner mappings, direct dimensions, configured popup/settings handoff, changed startup focus and invalid/legacy scopes OK")

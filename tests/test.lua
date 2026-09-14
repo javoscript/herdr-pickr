@@ -2,7 +2,9 @@ local uv = require("luv")
 local directory = assert(uv.fs_realpath(arg[0])):match("^(.*)/[^/]+$")
 local source = assert(directory:match("^(.*)/[^/]+$")) .. "/src"
 package.path = source .. "/?.lua;" .. package.path
+dofile(directory .. "/pickers.lua")
 dofile(directory .. "/configuration.lua")
+dofile(directory .. "/unified_configuration.lua")
 dofile(directory .. "/footer.lua")
 dofile(directory .. "/fzf_bindings.lua")
 local core, runtime, json = require("pickr.core"), require("pickr.runtime"), require("pickr.vendor.json")
@@ -94,7 +96,7 @@ do
   uv.os_setenv("HERDR_ENV", "1")
   runtime.current_workspace = function() return "original-space" end
   runtime.origin = function() return { workspace_id = "original-space", tab_id = "original-tab" } end
-  for _, entry in ipairs({ "tabs-current", "tabs-all", "spaces", "agents-current", "agents-all", "panes-tab", "panes-current", "panes-all" }) do
+  for entry in pairs(require("pickr.pickers").presets) do
     local called = false
     runtime.open_popup = function(entrypoint, workspace, launch_settings, tab)
       assert(entrypoint == entry and workspace == "original-space")
@@ -163,8 +165,8 @@ runtime.herdr = function(kind, action, flag, id)
 end
 runtime.focus_pane = function(id) focus_calls[#focus_calls + 1] = { "pane", id } end
 
-for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
-    { "workspaces", "all" }, { "agents", "current" }, { "agents", "all" } }) do
+for _, mode in ipairs({ { "tabs", "space" }, { "tabs", "all" },
+    { "spaces", "all" }, { "agents", "space" }, { "agents", "all" } }) do
   local rows, header = core.candidates(table.unpack(mode))
   local rebuilt, rebuilt_header = core.snapshot_candidates(runtime.herdr("api", "snapshot").snapshot,
     mode[1], mode[2], "w1")
@@ -185,10 +187,10 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
   end
   local labels = plain(header):match("^[^\t]+\t[^\t]+\t(.*)$"):gsub("%s+", " "):gsub("^ ", "")
   local expected_headers = {
-    ["workspaces:all"] = "status · space · tabs · directory",
-    ["tabs:current"] = "status · tab · panes · directory",
+    ["spaces:all"] = "status · space · tabs · directory",
+    ["tabs:space"] = "status · space · tab · panes · directory",
     ["tabs:all"] = "status · space · tab · panes · directory",
-    ["agents:current"] = "status · tab · agent · title · pane [label]",
+    ["agents:space"] = "status · space · tab · agent · title · pane [label]",
     ["agents:all"] = "status · space · tab · agent · title · pane [label]",
   }
   equal(labels, expected_headers[mode[1] .. ":" .. mode[2]])
@@ -196,7 +198,7 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
     "--delimiter=\t", "--with-nth=3..", "--filter=status" },
     header .. "\n" .. table.concat(rows, "\n"), runtime.fzf_env(), 5000)
   assert(header_code == 1 and header_output == "", "Header must not be searchable/selectable")
-  if mode[2] == "current" then
+  if mode[2] == "space" then
     assert(#rows == 2)
     for _, row in ipairs(rows) do assert(row:match("^w1:")) end
   end
@@ -210,11 +212,11 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
       assert((flags["--no-sort"] == true) == (mode[1] ~= "tabs" or mode[2] == "all"))
       assert(flags["--ansi"])
       assert(flags["--header-lines=1"])
-      assert(flags["--expect=ctrl-r,ctrl-t,ctrl-s,ctrl-a,ctrl-g,alt-1,alt-2,alt-3"])
+      assert(flags["--expect=" .. table.concat(require("pickr.keymap").expect(config.owner().keymap, mode[1], mode[2]), ",")])
       assert(flags["--with-nth=3.."])
       assert(flags["--preview-window=right:50%:border-left:nowrap"])
       assert(flags["--preview=" .. runtime.preview_command()])
-      assert(flags["--bind=esc:abort"] and flags["--bind=ctrl-c:abort"] and flags["--bind=enter:accept"])
+      assert(flags["--bind=esc:abort"] and flags["--bind=ctrl-c:ignore"] and flags["--bind=enter:accept"])
       -- Preview bindings are installed by the runtime's owner-control helper.
       assert(not flags["--bind=ctrl-p:toggle-preview"])
       return code, code == 0 and "\n" .. plain(rows[2]) .. "\n" or "", "", 0
@@ -231,7 +233,7 @@ for _, mode in ipairs({ { "tabs", "current" }, { "tabs", "all" },
   assert(not pcall(core.pick, table.unpack(mode)), "Header must not be a valid selection")
 end
 -- Pane labels are display-only suffixes, searchable through production fzf flags.
-for _, scope in ipairs({ "current", "all" }) do
+for _, scope in ipairs({ "space", "all" }) do
   local rows = core.candidates("agents", scope)
   assert(rows[1]:find("w1:p1 \27[38;2;82;79;103m[review-é queue [one]]\27[0m", 1, true))
   equal(rows[1]:match("^([^\t]+)\t([^\t]+)"), "w1:p1")
@@ -274,8 +276,8 @@ equal(core.aligned_rows({ { "id", "a\nb\t", "x" } }), { "id\t-\ta b   ·  x" })
 -- Use the production flags in every variant: one term cannot span columns,
 -- but separate terms can match different columns (including the last one).
 local original_candidates = core.candidates
-for _, mode in ipairs({ { "tabs", "current", 4 }, { "tabs", "all", 5 },
-    { "workspaces", "all", 4 }, { "agents", "current", 5 }, { "agents", "all", 6 } }) do
+for _, mode in ipairs({ { "tabs", "space", 5 }, { "tabs", "all", 5 },
+    { "spaces", "all", 4 }, { "agents", "space", 6 }, { "agents", "all", 6 } }) do
   local entry = { "hidden-selection", "alpha", "beta", indicator = "\27[31m●\27[0m",
     preview_pane = "hidden-preview" }
   local heading = { "@header", "status", "name", indicator = " " }
@@ -314,10 +316,10 @@ local function preview_ids(kind, scope)
   end
   return result
 end
-equal(preview_ids("workspaces", "all"), { "w1:p3", "w2:p1" })
-equal(preview_ids("tabs", "current"), { "w1:p2", "w1:p3" })
+equal(preview_ids("spaces", "all"), { "w1:p3", "w2:p1" })
+equal(preview_ids("tabs", "space"), { "w1:p2", "w1:p3" })
 equal(preview_ids("tabs", "all"), { "w1:p2", "w1:p3", "w2:p1" })
-equal(preview_ids("agents", "current"), { "w1:p1", "w1:p2" })
+equal(preview_ids("agents", "space"), { "w1:p1", "w1:p2" })
 equal(preview_ids("agents", "all"), { "w1:p1", "w1:p2", "w2:p1" })
 
 -- Priority beats recency; equal keys retain API order, including missing data.
@@ -365,9 +367,9 @@ for _, id in ipairs(expected_spaces) do
   expected_tabs[#expected_tabs + 1] = id .. ":t9"
   expected_tabs[#expected_tabs + 1] = id .. ":t2"
 end
-equal(ids(core.candidates("workspaces", "all")), expected_spaces)
+equal(ids(core.candidates("spaces", "all")), expected_spaces)
 equal(ids(core.candidates("tabs", "all")), expected_tabs)
-for _, mode in ipairs({ { "workspaces", "all" }, { "tabs", "all" } }) do
+for _, mode in ipairs({ { "spaces", "all" }, { "tabs", "all" } }) do
   for _, row in ipairs(core.candidates(table.unpack(mode))) do
     local id = row:match("^([^\t]+)")
     local child = id:match("^a%-child") or id:match("^b%-child")
@@ -402,7 +404,7 @@ assert(not named_agents[2]:find("-parent match]", 1, true))
 local saved_child_label = workspaces[6].label
 workspaces[6].label = "longer-worktree-é\nbranch"
 agents[#agents + 1] = { pane_id = "a-child2:p9", tab_id = "a-child2:t9", workspace_id = "a-child2" }
-for _, mode in ipairs({ { "workspaces", "all" }, { "tabs", "all" }, { "agents", "all" } }) do
+for _, mode in ipairs({ { "spaces", "all" }, { "tabs", "all" }, { "agents", "all" } }) do
   local annotation_column, count = nil, 0
   for _, row in ipairs(core.candidates(table.unpack(mode))) do
     local display = plain(row):match("^[^\t]+\t[^\t]+\t(.*)$")
@@ -422,14 +424,14 @@ workspaces[6].label = saved_child_label
 agents = previous_agents
 equal(workspaces[1].workspace_id, "a-child1") -- Do not mutate the snapshot.
 uv.os_setenv("HERDR_ACTIVE_WORKSPACE_ID", "a-parent")
-equal(ids(core.candidates("tabs", "current")), { "a-parent:t9", "a-parent:t2" })
+equal(ids(core.candidates("tabs", "space")), { "a-parent:t9", "a-parent:t2" })
 uv.os_setenv("HERDR_ACTIVE_WORKSPACE_ID", "w1")
-for _, kind in ipairs({ "workspaces", "tabs" }) do
+for _, kind in ipairs({ "spaces", "tabs" }) do
   local rows = core.candidates(kind, "all")
-  local expected = kind == "workspaces" and expected_spaces or expected_tabs
+  local expected = kind == "spaces" and expected_spaces or expected_tabs
   for _, row in ipairs(rows) do
     local id, preview = row:match("^([^\t]+)\t([^\t]+)\t")
-    equal(preview, kind == "workspaces" and id .. ":p2" or id:gsub(":t", ":p"))
+    equal(preview, kind == "spaces" and id .. ":p2" or id:gsub(":t", ":p"))
   end
   runtime.run = function(command, args, input, env)
     args[#args + 1] = "--filter=match"
@@ -441,10 +443,10 @@ for _, kind in ipairs({ "workspaces", "tabs" }) do
   end
   focus_calls = {}
   core.pick(kind, "all")
-  equal(focus_calls, { { kind == "workspaces" and "workspace" or "tab", expected[1] } })
+  equal(focus_calls, { { kind == "spaces" and "workspace" or "tab", expected[1] } })
 end
 -- Filtering can show a matching worktree without its nonmatching parent.
-local grouped_rows = core.candidates("workspaces", "all")
+local grouped_rows = core.candidates("spaces", "all")
 local code, output = original_run("fzf", { "--ansi", "--no-sort", "--delimiter=\t",
   "--with-nth=3..", "--exact", "--filter=a-child" }, table.concat(grouped_rows, "\n"), runtime.fzf_env(), 5000)
 assert(code == 0)
@@ -456,7 +458,7 @@ print("Worktree grouping: parent-first, multiple projects, orphans, tab order, s
 
 -- Spaces/tabs use the server's aggregate even when agent fixtures disagree,
 -- and never sort by that status. Paths use remembered tab focus, not list order.
-local space_rows, tab_rows = core.candidates("workspaces", "all"), core.candidates("tabs", "all")
+local space_rows, tab_rows = core.candidates("spaces", "all"), core.candidates("tabs", "all")
 equal(ids(space_rows), { "w1", "w2" })
 equal(ids(tab_rows), { "w1:t1", "w1:t2", "w2:t1" })
 assert(space_rows[1]:find("\27[38;2;49;116;143m○", 1, true))
@@ -480,7 +482,7 @@ panes[2].foreground_cwd = saved_cwd
 local saved_focus = layouts[1].focused_pane_id
 layouts[1].focused_pane_id = "missing"
 assert(plain(core.candidates("tabs", "all")[1]):match("—$"))
-equal(preview_ids("tabs", "current"), { "-", "w1:p3" })
+equal(preview_ids("tabs", "space"), { "-", "w1:p3" })
 layouts[1].focused_pane_id = saved_focus
 
 -- Every status uses the same exact color/glyph for workspace and tab rows.
@@ -491,7 +493,7 @@ for _, spec in ipairs({
     { "unknown", "110;106;134", "·" }, { false, "110;106;134", "·" },
   }) do
   workspaces[1].agent_status, tabs[1].agent_status = spec[1], spec[1]
-  for _, mode in ipairs({ { "tabs", "all" }, { "tabs", "current" }, { "workspaces", "all" } }) do
+  for _, mode in ipairs({ { "tabs", "all" }, { "tabs", "space" }, { "spaces", "all" } }) do
     local rows = core.candidates(table.unpack(mode))
     assert(rows[1]:find("\t\27[38;2;" .. spec[2] .. "m" .. spec[3] .. "\27[0m ", 1, true))
     local expected_id = mode[1] == "tabs" and "w1:t1" or "w1"
@@ -501,7 +503,7 @@ end
 workspaces[1].agent_status, tabs[1].agent_status = saved_ws_status, saved_tab_status
 
 -- Real fzf must strip ANSI and accept directory matches in each new variant.
-for _, mode in ipairs({ { "tabs", "all" }, { "tabs", "current" }, { "workspaces", "all" } }) do
+for _, mode in ipairs({ { "tabs", "all" }, { "tabs", "space" }, { "spaces", "all" } }) do
   runtime.run = function(command, args, input, env)
     args[#args + 1] = "--filter=/active-tab"
     local code, output, errors, signal = original_run(command, args, input, env, 5000)
@@ -518,7 +520,7 @@ print("Spaces/tabs: aggregate indicators, unchanged order, focused directories a
 local all_rows = core.candidates("agents", "all")
 equal(ids(all_rows), { "w2:p6", "w1:p7", "w1:p5", "w1:p4", "w1:p3",
   "w1:p2", "w1:p10", "w1:p1", "w1:p8", "w1:p9" })
-equal(ids(core.candidates("agents", "current")), { "w1:p7", "w1:p5", "w1:p4",
+equal(ids(core.candidates("agents", "space")), { "w1:p7", "w1:p5", "w1:p4",
   "w1:p3", "w1:p2", "w1:p10", "w1:p1", "w1:p8", "w1:p9" })
 for _, row in ipairs(all_rows) do
   assert(row:match("\t\27%[38;2;[%d;]+m[^\27]+\27%[0m "))
@@ -542,19 +544,16 @@ core.pick("agents", "all")
 equal(focus_calls, { { "pane", "w2:p6" } })
 print("Agents: priority, recency, stable ties, status dots and fixed fuzzy-filter order OK")
 
--- All 64 source/destination pairs must stay in the popup until an actual
+-- All 16 type source/destination pairs must stay in the popup until an actual
 -- selection, with fresh rows and the destination's scope/sort/preview options.
 local variants = {
-  { "ctrl-r", "tabs", "current" }, { "ctrl-t", "tabs", "all" },
-  { "ctrl-s", "workspaces", "all" }, { "ctrl-a", "agents", "current" },
-  { "ctrl-g", "agents", "all" },
-  { "alt-1", "panes", "tab" }, { "alt-2", "panes", "current" }, { "alt-3", "panes", "all" },
+  { "ctrl-t", "tabs", "all" }, { "ctrl-s", "spaces", "all" },
+  { "ctrl-a", "agents", "all" }, { "ctrl-r", "panes", "all" },
 }
-local prompt_overrides = { tabs_current = "Tabs: ", tabs_all = "All tabs: ", spaces = "",
-  agents_current = "Agents: ", agents_all = "  ◉ ' $(touch nope); +change-prompt(x) ",
-  panes_tab = "Splits: ", panes_current = "Project: ", panes_all = "Panes: " }
+local prompt_overrides = { tabs = "Tabs: ", spaces = "",
+  agents = "  ◉ ' $(touch nope); +change-prompt(x) ", panes = "Panes: " }
 local function variant_name(variant)
-  return variant[2] == "workspaces" and "spaces" or variant[2] .. "_" .. variant[3]
+  return variant[2]
 end
 local function assert_prompt(args, expected)
   local count = 0
@@ -569,7 +568,7 @@ end
 do
   local saved_picker = runtime.run_picker
   for _, text in ipairs({ '{}', '{"prompt":{"default":"Find: "}}',
-    '{"prompt":{"default":""}}', json.encode({ prompt = { default = prompt_overrides.agents_all } }),
+    '{"prompt":{"default":""}}', json.encode({ prompt = { default = prompt_overrides.agents } }),
     json.encode({ prompt = { variants = prompt_overrides } }) }) do
     local settings = config.decode(text)
     for _, variant in ipairs(variants) do
@@ -636,35 +635,35 @@ runtime.run = function(_, _, input)
   assert(runs == 2 and input ~= "")
   return 130, "", "", 0
 end
-core.pick("agents", "current")
+core.pick("agents", "space")
 equal(focus_calls, {})
 agents = saved_agents
-print("Picker switching: all 64 routes, empty results, cancellation and destination options OK")
+print("Picker switching: all 16 type routes, empty results, cancellation and destination options OK")
 
 do
   local saved_picker, saved_candidates = runtime.run_picker, core.candidates
   local keymap = require("pickr.keymap")
   local settings = config.decode('{"keys":{"accept":["f1","alt-v"],"close":["f2"],'
-    .. '"refresh":["f3","f4"],"toggle_preview":["f5"],"tabs_current":["f6"],'
-    .. '"tabs_all":["f7"],"spaces":["f8"],"agents_current":["f9"],"agents_all":["f10"],'
-    .. '"panes_tab":["f11"],"panes_current":["f12"],"panes_all":["alt-4"]}}')
+    .. '"refresh":["f3","f4"],"toggle_preview":["f5"],"tabs":["f6"],'
+    .. '"spaces":["f8"],"agents":["f9"],"panes":["f11"],'
+    .. '"scope_all":["f7"],"scope_space":["f10"],"scope_tab":["f12"]}}')
   settings.prompt = config.decode(json.encode({ prompt = { variants = prompt_overrides } })).prompt
   for _, show_hints in ipairs({ true, false }) do
   settings.popup.show_hints = show_hints
   for _, empty in ipairs({ false, true }) do
     for _, source_variant in ipairs(variants) do
-      for _, action in ipairs({ "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }) do
+      for _, action in ipairs({ "tabs", "spaces", "agents", "panes" }) do
         local calls = 0
         core.candidates = function(kind, scope)
           calls = calls + 1
-          if calls == 2 then equal({ kind, scope }, keymap.variants[action]) end
+          if calls == 2 then equal({ kind, scope }, { action, require("pickr.pickers").effective(action, "all") }) end
           return empty and {} or { "id\tpreview\tlabel" }, "@header\t-\theader"
         end
         runtime.run_picker = function(_, args, _, _, session, _, footer)
           assert(session.settings == settings)
           assert_prompt(args, prompt_overrides[calls == 1 and variant_name(source_variant) or action])
           local flags = {}; for _, option in ipairs(args) do flags[option] = true end
-          assert(flags["--expect=f6,f7,f8,f9,f10,f11,f12,alt-4"])
+          assert(flags["--expect=" .. table.concat(keymap.expect(settings.keymap, session.kind, session.popup.chosen_scope), ",")])
           assert(flags["--bind=f1:accept"] and flags["--bind=alt-v:accept"] and flags["--bind=f2:abort"])
           assert(not flags["--bind=enter:accept"] and not flags["--bind=esc:abort"])
           if show_hints then
@@ -685,7 +684,7 @@ do
   end
   end
   local disabled = config.decode('{"keys":{"accept":["f1"],"close":["f2"],"refresh":[],"toggle_preview":[], '
-    .. '"tabs_current":[],"tabs_all":[],"spaces":[],"agents_current":[],"agents_all":[],"panes_tab":[],"panes_current":[],"panes_all":[]}}')
+    .. '"tabs":[],"spaces":[],"agents":[],"panes":[],"scope_all":[],"scope_space":[],"scope_tab":[]}}')
   core.candidates = function() return { "id\tpreview\tlabel" }, "@header\t-\theader" end
   runtime.run_picker = function(_, args, _, _, session, _, footer)
     assert(not session.has_expect)
@@ -696,10 +695,10 @@ do
   for _, variant in ipairs(variants) do core.pick(variant[2], variant[3], disabled) end
   equal(keymap.gate(settings.keymap, "unbind", { "accept", "refresh" }),
     "unbind(f1)+unbind(alt-v)+unbind(f3)+unbind(f4)")
-  equal(keymap.gate(disabled.keymap, "rebind", { "refresh", "toggle_preview", "tabs_all" }), "")
+  equal(keymap.gate(disabled.keymap, "rebind", { "refresh", "toggle_preview", "tabs" }), "")
   runtime.run_picker, core.candidates = saved_picker, saved_candidates
 end
-print("Configured actions: remapped 64 routes with empty/zero-match results, aliases, disabled hints and refresh gates OK")
+print("Configured actions: remapped type routes with empty/zero-match results, aliases, disabled hints and refresh gates OK")
 
 do
   local saved_picker = runtime.run_picker
@@ -750,7 +749,7 @@ do
   end
   runtime.run_picker = saved_picker
 end
-print("Preview settings: both initial states across all 64 routes, replacement aliases and disabled hints OK")
+print("Preview settings: both initial states across all 16 type routes, replacement aliases and disabled hints OK")
 
 -- Preview reads the visible ANSI screen only, and reports failures without
 -- invoking focus or waiting for keyboard input in the preview subprocess.
@@ -850,11 +849,11 @@ do
   local saved_herdr, saved_focus = runtime.herdr, runtime.focus_pane
   local saved_origin = runtime.origin
   runtime.origin = function() return { workspace_id = "fixture-origin", tab_id = "fixture-tab" } end
-  local order = { 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 8 }
+  local order = { 1, 2, 3, 4, 1, 2, 3, 4, 4 }
   local literal = "  雪 ' $(touch nope); +change-query(x) "
   local invocation, focused = 0, 0
   core.candidates = function(kind, scope)
-    local prefix = kind .. scope
+    local prefix = kind .. (scope or "all")
     return { prefix .. "A\tp1\tfirst", prefix .. "B\tp2\tsecond" }, "@header\t-\theader"
   end
   runtime.herdr = function() focused = focused + 1 end
@@ -878,9 +877,9 @@ do
           for _, option in ipairs(nested_args) do query = option:match("^%-%-query=(.*)$") or query end
           assert(query == (calls == 2 and "nested query" or nil))
           assert(not nested.entry_id)
-          return calls == 1 and 1 or 130, { query = "nested query", key = "ctrl-r" }, "", 0
+          return calls == 1 and 1 or 130, { query = "nested query", key = "ctrl-t" }, "", 0
         end
-        core.pick("tabs", "current", session.settings)
+        core.pick("tabs", "all", session.settings)
         assert(calls == 2)
         runtime.run_picker = outer
       end
@@ -891,7 +890,7 @@ do
       session:close()
       return next_view and 0 or exit_code, result, "fixture failure", 0
     end
-    local ok, err = pcall(core.pick, "tabs", "current", config.decode("{}"))
+    local ok, err = pcall(core.pick, "tabs", "all", config.decode("{}"))
     assert(ok == (exit_code ~= 2), tostring(err))
     assert(step == #order)
     invocation = invocation + 1
@@ -901,7 +900,7 @@ do
   runtime.herdr, runtime.focus_pane = saved_herdr, saved_focus
   runtime.origin = saved_origin
 end
-print("View memory: all eight independent round trips, same-view save-before-restore, literal argv and fresh popup isolation OK")
+print("Type memory: four independent round trips, same-type save-before-restore, literal argv and fresh popup isolation OK")
 
 do
   local saved_picker, saved_candidates = runtime.run_picker, core.candidates
@@ -916,10 +915,10 @@ do
   core.candidates = function() return { "one\tpreview\told label" }, "@header\t-\theader" end
   core.snapshot_candidates = function(snapshot, kind, scope, current, settings)
     assert(settings == expected_settings)
-    equal(settings.prompt.variants[kind .. "_" .. scope], active_prompt)
+    equal(settings.prompt.variants[kind], active_prompt)
     equal(current, "original-space")
     equal(snapshot, { fresh = true })
-    assert(scope == "current" and (kind == "tabs" or kind == "agents"))
+    assert(scope == "space" and (kind == "tabs" or kind == "agents"))
     return { "one\tnew-preview\tnew label" }, "@header\t-\tnew header"
   end
   runtime.run_picker = function(_, args, _, _, session, render)
@@ -939,8 +938,8 @@ do
   end
   for _, kind in ipairs({ "tabs", "agents" }) do
     origin = "original-space"
-    active_prompt = prompt_overrides[kind .. "_current"]
-    core.pick(kind, "current", expected_settings)
+    active_prompt = prompt_overrides[kind]
+    core.pick(kind, "space", expected_settings)
   end
   runtime.run_picker, core.candidates = saved_picker, saved_candidates
   runtime.current_workspace, core.snapshot_candidates = saved_current, saved_snapshot
@@ -1010,7 +1009,7 @@ for _, scenario in ipairs({ "success", "error", "wrong-pane", "wrong-id", "malfo
       if method == "pane.focus" then assert(request.params.pane_id == "opaque-id")
       else
         local p = request.params
-        assert(p.entrypoint == "tabs-current" and p.plugin_id == "javoscript.herdr-pickr")
+        assert(p.entrypoint == "tabs-space" and p.plugin_id == "javoscript.herdr-pickr")
         assert(p.width == 65535 and p.height == "90%" and p.placement == "popup" and p.focus)
         assert(p.workspace_id == nil and p.target_pane_id == nil,
           "Herdr rejects explicit workspace/pane targets for popup placement")
@@ -1024,7 +1023,7 @@ for _, scenario in ipairs({ "success", "error", "wrong-pane", "wrong-id", "malfo
       response.id = scenario == "wrong-id" and "wrong" or request.id
       if method == "plugin.pane.open" and scenario ~= "error" then
         response.result = { type = "plugin_pane_opened", plugin_pane = {
-          plugin_id = "javoscript.herdr-pickr", entrypoint = scenario == "wrong-pane" and "spaces" or "tabs-current",
+          plugin_id = "javoscript.herdr-pickr", entrypoint = scenario == "wrong-pane" and "spaces" or "tabs-space",
           pane = { pane_id = "popup-id" },
         } }
       end
@@ -1045,7 +1044,7 @@ for _, scenario in ipairs({ "success", "error", "wrong-pane", "wrong-id", "malfo
   runtime.socket_request = function(m, params, id) return saved_request(m, params, id, 20) end
   local ok
   if method == "pane.focus" then ok = pcall(runtime.focus_pane, "opaque-id")
-  else ok = pcall(runtime.open_popup, "tabs-current", "original-space",
+  else ok = pcall(runtime.open_popup, "tabs-space", "original-space",
     config.decode('{"popup":{"width":1000000,"height":"90%"}}')) end
   runtime.socket_request = saved_request
   -- Closing the server may already have removed the socket path.
@@ -1063,7 +1062,7 @@ core.snapshot_candidates = snapshot_candidates
 dofile(directory .. "/themed_rendering.lua")
 dofile(directory .. "/documentation.lua")
 -- Separate Lua processes keep fixture overrides isolated from real PTY checks.
-for _, name in ipairs({ "pane_launch.lua", "panes.lua", "columns.lua", "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua" }) do
+for _, name in ipairs({ "pane_launch.lua", "panes.lua", "columns.lua", "pty_runner_test.lua", "fzf_compat.lua", "fzf_actions.lua", "unified_fzf.lua" }) do
   local code, output, errors = require("pickr.process").run(assert(uv.exepath()),
     { directory .. "/" .. name }, nil, runtime.fzf_env(), 600000)
   io.write(output)

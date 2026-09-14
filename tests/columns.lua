@@ -10,11 +10,8 @@ local function fails(fn, field)
   assert(not ok and tostring(err):find(field, 1, true), tostring(err))
 end
 local expected = {
-  spaces = "status,space,tabs,directory", tabs_current = "status,tab,panes,directory",
-  tabs_all = "status,space,tab,panes,directory", agents_current = "status,tab,agent,title,pane",
-  agents_all = "status,space,tab,agent,title,pane",
-  panes_tab = "status,title,pane,directory", panes_current = "status,tab,title,pane,directory",
-  panes_all = "status,space,tab,title,pane,directory",
+  spaces = "status,space,tabs,directory", tabs = "status,space,tab,panes,directory",
+  agents = "status,space,tab,agent,title,pane", panes = "status,space,tab,title,pane,directory",
 }
 for _, text in ipairs({ '{}', '{"columns":null}', '{"columns":{}}' }) do
   for variant, names in pairs(expected) do
@@ -40,24 +37,24 @@ for _, text in ipairs({ '{"tabs_here":null}', '{"tabs_current":["space"]}', '{"a
   '{"panes_tab":["tab"]}', '{"panes_tab":["space"]}', '{"panes_current":["space"]}' }) do
   fails(function() config.decode('{"columns":' .. text .. '}') end, "columns.")
 end
-local text = '{"columns":{"tabs_all":["directory","tab"],"spaces":["tabs"]}}'
+local text = '{"columns":{"tabs":["directory","tab"],"spaces":["tabs"]}}'
 local deps = { getenv = function(key)
   return ({ HERDR_PLUGIN_ID = "javoscript.herdr-pickr", HERDR_PLUGIN_CONFIG_DIR = "/fixture" })[key]
 end, read_file = function() return text end }
 local original = config.load(deps)
 local handoff = config.snapshot(original)
-text = '{"columns":{"tabs_all":["status"]}}'
+text = '{"columns":{"tabs":["status"]}}'
 local owner = config.owner({ getenv = function() return handoff end,
   read_file = function() error("snapshot must not reread config") end })
-equal(table.concat(owner.columns.tabs_all, ","), "directory,tab")
-equal(table.concat(config.load(deps).columns.tabs_all), "status")
+equal(table.concat(owner.columns.tabs, ","), "directory,tab")
+equal(table.concat(config.load(deps).columns.tabs), "status")
 for _, bad in ipairs({ 'null', '{}', '{"spaces":[]}', '{"spaces":["space","space"]}' }) do
   local invalid = json.decode(handoff, true)
   invalid.settings.columns = json.decode(bad, true)
   fails(function() config.owner({ getenv = function() return json.encode(invalid) end }) end, "columns")
 end
-text = '{"columns":{"agents_all":["directory"]}}'
-fails(function() config.load(deps) end, "/fixture/config.json: columns.agents_all")
+text = '{"columns":{"agents":["directory"]}}'
+fails(function() config.load(deps) end, "/fixture/config.json: columns.agents")
 
 -- Run both actual entrypoints with a failing config and tripwires on popup/fzf.
 local launch = [=[
@@ -68,13 +65,13 @@ config.load = function() return config.decode(invalid) end
 runtime.open_popup = function() error("POPUP_STARTED") end
 runtime.run_picker = function() error("FZF_STARTED") end
 local root, mode = arg[1], arg[2]
-arg = mode == "open" and { "spaces" } or { [0] = root .. "/src/main.lua", "workspaces", "all" }
+arg = mode == "open" and { "spaces" } or { [0] = root .. "/src/main.lua", "spaces" }
 dofile(root .. "/src/" .. (mode == "open" and "open.lua" or "main.lua"))
 ]=]
-for _, invalid in ipairs({ { '{"columns":{"agents_all":["directory"]}}', "columns.agents_all" },
-  { '{"columns":{"panes_tab":["tab"]}}', "columns.panes_tab" },
-  { '{"keys":{"panes_all":"alt-3"}}', "keys.panes_all" },
-  { '{"prompt":{"variants":{"panes_current":false}}}', "prompt.variants.panes_current" } }) do
+for _, invalid in ipairs({ { '{"columns":{"agents":["directory"]}}', "columns.agents" },
+  { '{"columns":{"panes":["tabs"]}}', "columns.panes" },
+  { '{"keys":{"panes":"alt-3"}}', "keys.panes" },
+  { '{"prompt":{"variants":{"panes":false}}}', "prompt.variants.panes" } }) do
 for _, mode in ipairs({ "open", "main" }) do
   local env = runtime.fzf_env(); env[#env + 1] = "HERDR_ENV=1"
   local code, _, err = require("pickr.process").run(uv.exepath(),
@@ -135,8 +132,12 @@ runtime.current_workspace = function() return "w1" end
 runtime.origin = function() return { workspace_id = "w1", tab_id = "t1" } end
 runtime.herdr = function() return { snapshot = snapshot } end
 runtime.preview_command = function() return "true" end
-local variants = require("pickr.keymap").variants
-for variant, mode in pairs(variants) do
+local variants = require("pickr.pickers").presets
+local modes = { { "spaces", "all" }, { "tabs", "all" }, { "tabs", "space" },
+  { "panes", "all" }, { "panes", "space" }, { "panes", "tab" },
+  { "agents", "all" }, { "agents", "space" }, { "agents", "tab" } }
+for _, mode in ipairs(modes) do
+  local variant = mode[1]
   local defaults = columns.defaults[variant]
   local baseline, base_header = core.snapshot_candidates(snapshot, mode[1], mode[2], "w1", nil, "t1")
   assert(#baseline > 0)
@@ -182,21 +183,22 @@ for variant, mode in pairs(variants) do
     end
   end
 end
-print("Columns rendering: eight variants, subsets, single columns, moved status, themes, annotations, alignment and identity OK")
+print("Columns rendering: nine effective type/scopes, subsets, single columns, moved status, themes, annotations, alignment and identity OK")
 
 for _, label in ipairs({ false, "", json.null }) do
   local saved = snapshot.panes[1].label
   snapshot.panes[1].label = label
   if label == json.null then snapshot.panes[1].label = nil end
-  local rows = core.snapshot_candidates(snapshot, "agents", "current", "w1",
-    config.decode('{"columns":{"agents_current":["pane","title"]}}'))
+  local rows = core.snapshot_candidates(snapshot, "agents", "space", "w1",
+    config.decode('{"columns":{"agents":["pane","title"]}}'))
   equal(cells(rows[1])[1], "p1")
   snapshot.panes[1].label = saved
 end
 
 -- Exercise production search flags rather than reconstructing fzf options.
 local function filter(variant, layout, query, matches)
-  local mode, settings = variants[variant], config.decode(json.encode({ columns = { [variant] = layout } }))
+  local mode = assert(variants[variant])
+  local settings = config.decode(json.encode({ columns = { [mode[1]] = layout } }))
   runtime.run_picker = function(_, args, input)
     args[#args + 1] = "--filter=" .. query
     args[#args + 1] = "--no-print-query"
@@ -208,30 +210,34 @@ local function filter(variant, layout, query, matches)
   core.pick(mode[1], mode[2], settings)
 end
 for _, case in ipairs({
-  { "tabs_all", { "tab", "directory" }, "alpha directoryonly", true },
-  { "tabs_all", { "tab", "directory" }, "alphadirectoryonly", false },
-  { "tabs_all", { "tab" }, "directoryonly", false },
-  { "tabs_all", { "tab" }, "parent", false },
-  { "tabs_all", { "tab" }, "working", false },
-  { "tabs_all", { "tab" }, "alpha", true },
-  { "agents_all", { "title", "agent" }, "labelonly", false },
-  { "agents_all", { "title", "agent" }, "p2", false },
-  { "agents_all", { "title", "agent" }, "omega agentonly", true },
-  { "agents_all", { "pane" }, "labelonly", true },
-  { "agents_all", { "agent", "status" }, "blocked", true },
+  { "tabs-all", { "tab", "directory" }, "alpha directoryonly", true },
+  { "tabs-all", { "tab", "directory" }, "alphadirectoryonly", false },
+  { "tabs-all", { "tab" }, "directoryonly", false },
+  { "tabs-all", { "tab" }, "parent", false },
+  { "tabs-all", { "tab" }, "working", false },
+  { "tabs-all", { "tab" }, "alpha", true },
+  { "agents-all", { "title", "agent" }, "labelonly", false },
+  { "agents-all", { "title", "agent" }, "p2", false },
+  { "agents-all", { "title", "agent" }, "omega agentonly", true },
+  { "agents-all", { "pane" }, "labelonly", true },
+  { "agents-all", { "agent", "status" }, "blocked", true },
   { "spaces", { "tabs" }, "parent", false },
   { "spaces", { "tabs" }, "tabs", true },
-  { "panes_tab", { "directory", "pane" }, "directoryonly review", true },
-  { "panes_current", { "title", "directory" }, "omega directoryonly", true },
-  { "panes_current", { "title", "directory" }, "omegadirectoryonly", false },
-  { "panes_all", { "pane" }, "labelonly", true },
-  { "panes_all", { "title" }, "p2", false },
-  { "panes_all", { "title" }, "labelonly", false },
-  { "panes_all", { "title" }, "elsewhere", false },
-  { "panes_all", { "title" }, "blocked", false },
-  { "panes_all", { "title" }, "beta", false },
-  { "panes_all", { "title" }, "child", false },
-  { "panes_all", { "space" }, "parent", true },
+  { "panes-tab", { "directory", "pane" }, "directoryonly review", true },
+  { "panes-space", { "title", "directory" }, "omega directoryonly", true },
+  { "panes-space", { "title", "directory" }, "omegadirectoryonly", false },
+  { "panes-all", { "pane" }, "labelonly", true },
+  { "panes-all", { "title" }, "p2", false },
+  { "panes-all", { "title" }, "labelonly", false },
+  { "panes-all", { "title" }, "elsewhere", false },
+  { "panes-all", { "title" }, "blocked", false },
+  { "panes-all", { "title" }, "beta", false },
+  { "panes-all", { "title" }, "child", false },
+  { "panes-all", { "space" }, "parent", true },
+  { "panes-space", { "space", "tab" }, "parent alpha", true },
+  { "panes-tab", { "space", "tab" }, "parent alpha", true },
+  { "agents-tab", { "space", "tab" }, "parent alpha", true },
+  { "tabs-space", { "space", "tab" }, "parent alpha", true },
 }) do filter(table.unpack(case)) end
 for variant, defaults in pairs(columns.defaults) do
   filter(variant, { defaults[2] }, "p1", false)
@@ -239,10 +245,9 @@ for variant, defaults in pairs(columns.defaults) do
 end
 
 -- Same resolved settings are carried through switches and refresh failure/retry.
-local settings = config.decode('{"columns":{"tabs_current":["tab"],"tabs_all":["directory"],"spaces":["tabs"],"agents_current":["title"],"agents_all":["agent"],"panes_tab":["title"],"panes_current":["pane"],"panes_all":["directory"]}}')
-local sequence = { "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }
-local keys = { tabs_all = "ctrl-t", spaces = "ctrl-s", agents_current = "ctrl-a", agents_all = "ctrl-g",
-  panes_tab = "alt-1", panes_current = "alt-2", panes_all = "alt-3" }
+local settings = config.decode('{"columns":{"tabs":["tab"],"spaces":["tabs"],"agents":["agent"],"panes":["directory"]}}')
+local sequence = { "tabs", "spaces", "agents", "panes" }
+local keys = { tabs = "ctrl-t", spaces = "ctrl-s", agents = "ctrl-a", panes = "ctrl-r" }
 local visits, focused = 0, nil
 runtime.focus_pane = function(id) focused = id end
 runtime.run_picker = function(_, args, input, _, session, render)
@@ -266,6 +271,6 @@ runtime.run_picker = function(_, args, input, _, session, render)
   if sequence[visits + 1] then return 1, { query = "", key = keys[sequence[visits + 1]] }, "" end
   return 0, { query = "", key = "", row = rows[1], target = session:accept(rows[1]) }, ""
 end
-core.pick("tabs", "current", settings)
-equal(visits, 8); equal(focused, "p1")
+core.pick("tabs", "all", settings)
+equal(visits, 4); equal(focused, "p1")
 print("Columns matching/session: real fzf visible-only independent matching, hidden IDs, switches, empty refresh, failure/retry and acceptance OK")

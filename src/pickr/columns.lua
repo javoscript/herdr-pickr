@@ -3,20 +3,14 @@ local M = {}
 
 M.defaults = {
   spaces = { "status", "space", "tabs", "directory" },
-  tabs_current = { "status", "tab", "panes", "directory" },
-  tabs_all = { "status", "space", "tab", "panes", "directory" },
-  agents_current = { "status", "tab", "agent", "title", "pane" },
-  agents_all = { "status", "space", "tab", "agent", "title", "pane" },
-  panes_tab = { "status", "title", "pane", "directory" },
-  panes_current = { "status", "tab", "title", "pane", "directory" },
-  panes_all = { "status", "space", "tab", "title", "pane", "directory" },
+  tabs = { "status", "space", "tab", "panes", "directory" },
+  agents = { "status", "space", "tab", "agent", "title", "pane" },
+  panes = { "status", "space", "tab", "title", "pane", "directory" },
 }
 
 function M.variant(kind, scope)
-  for variant, destination in pairs(require("pickr.keymap").variants) do
-    if destination[1] == kind and destination[2] == scope then return variant end
-  end
-  error("Unknown picker variant", 0)
+  assert(M.defaults[kind], "Unknown picker type")
+  return kind
 end
 
 function M.layout(kind, scope, settings)
@@ -33,6 +27,7 @@ function M.resolve(overrides, snapshot)
     error("columns: expected a JSON object", 0)
   end
   for variant in pairs(overrides) do
+    require("pickr.pickers").check_leaf("columns", variant)
     if not M.defaults[variant] then error("columns." .. variant .. ": unknown setting", 0) end
   end
   local resolved = {}

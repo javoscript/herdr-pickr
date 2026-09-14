@@ -8,7 +8,7 @@ Provide consistent column placement across Pickr's five picker variants so users
 
 ### Requirement: Picker columns follow a shared relative order
 
-By default, each picker SHALL display its existing visible columns in the relative order status, space, tab, agent, title, pane, directory, omitting columns not present in that picker. The count headings `tabs` and `panes` SHALL retain their names and values and occupy the tab and pane positions respectively. A configured column list SHALL replace the corresponding variant's default with exactly the listed columns in the listed order. Headers and row values SHALL use the same effective order. The `pane` column SHALL retain its `pane [label]` heading.
+Default columns SHALL be Spaces: `status`, `space`, `tabs`, `directory`; Tabs: `status`, `space`, `tab`, `panes`, `directory`; Panes: `status`, `space`, `tab`, `title`, `pane`, `directory`; Agents: `status`, `space`, `tab`, `agent`, `title`, `pane`. These lists SHALL be constant across each type's scopes. Count headings `tabs` and `panes` SHALL retain their values in tab/pane positions. A configured type list SHALL replace its entire default in exactly the configured order; headers and values SHALL agree, retaining the `pane [label]` heading. Empty lists SHALL retain fixed non-selectable column headings. Existing visible-column matching, attached annotations, status glyph/text grouping, hidden-ID targeting, candidate ordering, and preview semantics SHALL be preserved.
 
 #### Scenario: Spaces picker
 - **WHEN** the spaces picker is displayed with its default columns
@@ -16,7 +16,7 @@ By default, each picker SHALL display its existing visible columns in the relati
 
 #### Scenario: Current-space tabs picker
 - **WHEN** the current-space tabs picker is displayed with its default columns
-- **THEN** its columns are `status · tab · panes · directory`
+- **THEN** its columns are `status · space · tab · panes · directory`
 
 #### Scenario: All-spaces tabs picker
 - **WHEN** the all-spaces tabs picker is displayed with its default columns
@@ -25,7 +25,7 @@ By default, each picker SHALL display its existing visible columns in the relati
 
 #### Scenario: Current-space agents picker
 - **WHEN** the current-space agents picker is displayed with its default columns
-- **THEN** its columns are `status · tab · agent · title · pane`
+- **THEN** its columns are `status · space · tab · agent · title · pane`
 
 #### Scenario: All-spaces agents picker
 - **WHEN** the all-spaces agents picker is displayed with its default columns
@@ -36,20 +36,28 @@ By default, each picker SHALL display its existing visible columns in the relati
 - **THEN** its fixed, non-selectable header still displays that picker's effective column order
 
 #### Scenario: Ordered subset
-- **WHEN** `columns.tabs_all` is `["tab", "directory", "space"]`
-- **THEN** the all-spaces tabs header and rows display only tab, directory, and space, in that order
+- **WHEN** `columns.tabs` is `["tab", "directory", "space"]`
+- **THEN** both tab scopes' headers and rows display only tab, directory, and space, in that order
 - **AND** omitted status and pane-count columns leave no empty columns or extra separators
 
 #### Scenario: Single visible column
-- **WHEN** `columns.agents_current` is `["title"]`
-- **THEN** the current-space agents header and rows display only the title column without column separators or a status prefix
+- **WHEN** `columns.agents` is `["title"]` and the active agent scope is empty
+- **THEN** only the title heading is shown with no status prefix or extra column separators
+- **AND** later candidates still preview and focus their underlying pane IDs
 
 #### Scenario: Pane picker defaults
 - **WHEN** a pane picker opens with default columns
-- **THEN** panes-tab displays `status · title · pane · directory`
-- **AND** panes-current displays `status · tab · title · pane · directory`
-- **AND** panes-all displays `status · space · tab · title · pane · directory`
+- **THEN** every pane scope displays `status · space · tab · title · pane · directory`
 - **AND** every pane column uses its `pane [label]` heading
+
+#### Scenario: Stable defaults in every scope
+- **WHEN** Tabs, Panes, or Agents narrows scope with default columns
+- **THEN** its complete default list above remains visible and searchable, including space/tab context where present
+- **AND** Spaces retains its specified default list
+
+#### Scenario: Narrowing preserves context matching
+- **WHEN** a query matches a visible space name and the user narrows Panes from All spaces to This tab within that space
+- **THEN** remaining eligible panes still match the space term rather than losing it through automatic column hiding
 
 ### Requirement: Column reordering preserves picker behavior
 

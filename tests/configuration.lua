@@ -55,7 +55,7 @@ for _, text in ipairs({ "{}", '{"keys":null,"theme":null}',
   for action, keys in pairs(keymap.defaults) do equal(table.concat(settings.keymap.keys[action], ","), table.concat(keys, ",")) end
 end
 equal(themes.fzf(config.decode('{"theme":{"name":"rose-pine","custom":{"annotation":null}}}').roles.annotation), "#524f67")
-local optional = { "toggle_preview", "refresh", "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }
+local optional = { "toggle_preview", "refresh", "spaces", "tabs", "panes", "agents", "scope_all", "scope_space", "scope_tab" }
 for _, action in ipairs(optional) do
   local settings = config.decode('{"keys":{"' .. action .. '":[]}}')
   equal(#settings.keymap.keys[action], 0)
@@ -93,7 +93,7 @@ equal(keymap.normalize("A"), "A")
 equal(keymap.normalize("a"), "a")
 equal(keymap.normalize("ALT-A"), "alt-A")
 equal(keymap.normalize("RETURN"), "enter")
-for _, action in ipairs({ "panes_tab", "panes_current", "panes_all" }) do
+for _, action in ipairs({ "spaces", "tabs", "panes", "agents", "scope_all", "scope_space", "scope_tab" }) do
   local defaults = keymap.defaults[action]
   equal(config.decode('{"keys":{"' .. action .. '":null}}').keymap.keys[action][1], defaults[1])
   equal(config.decode('{"keys":{"' .. action .. '":["ALT-9","f1"]}}').keymap.keys[action][1], "alt-9")
@@ -101,6 +101,10 @@ for _, action in ipairs({ "panes_tab", "panes_current", "panes_all" }) do
   local resolved = config.decode('{"keys":{"refresh":["' .. defaults[1] .. '"],"' .. action .. '":[]}}')
   equal(resolved.keymap.reverse[defaults[1]], "refresh")
 end
+equal(table.concat(config.decode("{}").keymap.keys.close, ","), "esc")
+equal(config.decode("{}").keymap.reverse["ctrl-c"], "scope_tab")
+fails(function() config.decode('{"keys":{"close":["esc","ctrl-c"]}}') end, "conflicts")
+equal(config.decode('{"keys":{"close":["ctrl-c"],"scope_tab":[]}}').keymap.reverse["ctrl-c"], "close")
 local env = { HERDR_PLUGIN_ID = "javoscript.herdr-pickr", HERDR_PLUGIN_CONFIG_DIR = "/fixture settings" }
 local reads = 0
 local deps = { getenv = function(key) return env[key] end,
@@ -229,17 +233,17 @@ for _, fixture in ipairs(invalid_prompts) do
   deps.read_file = function() return fixture[1] end
   fails(function() config.load(deps) end, "/fixture settings/config.json: " .. fixture[2])
 end
-print("Configuration: prompt inheritance, eight variants, literal/empty strings and field/path diagnostics OK")
+print("Configuration: prompt inheritance, four types, literal/empty strings and field/path diagnostics OK")
 
 local contents = '{"theme":{"name":"terminal"},"keys":{"refresh":[]},"popup":{"width":120,"show_hints":false},'
-  .. '"prompt":{"default":"Original: ","variants":{"spaces":"","agents_all":"Agents: "}}}'
+  .. '"prompt":{"default":"Original: ","variants":{"spaces":"","agents":"Agents: "}}}'
 local loads = 0
 local launch_deps = { getenv = function(key) return env[key] end,
   read_file = function() loads = loads + 1; return contents end }
 local launched = config.load(launch_deps)
 local handoff = config.snapshot(launched)
 contents = '{"theme":{"name":"rose-pine"},"preview":{"enabled_by_default":false},'
-  .. '"prompt":{"default":"Edited: ","variants":{"spaces":"Spaces: ","agents_all":"New agents: "}}}'
+  .. '"prompt":{"default":"Edited: ","variants":{"spaces":"Spaces: ","agents":"New agents: "}}}'
 local owner = config.owner({ getenv = function(key)
   equal(key, "PICKR_SETTINGS_SNAPSHOT"); return handoff
 end, read_file = function() error("Owner must not reread launcher settings") end })
@@ -257,9 +261,9 @@ local reopened = config.owner(launch_deps)
 equal(reopened.theme_name, "rose-pine")
 equal(reopened.popup.show_hints, true)
 equal(reopened.prompt.default, "Edited: ")
-equal(reopened.prompt.variants.tabs_current, "Edited: ")
+equal(reopened.prompt.variants.tabs, "Edited: ")
 equal(reopened.prompt.variants.spaces, "Spaces: ")
-equal(reopened.prompt.variants.agents_all, "New agents: ")
+equal(reopened.prompt.variants.agents, "New agents: ")
 equal(loads, 2)
 local mutations = {
   function(s) s.popup.show_hints = nil end,

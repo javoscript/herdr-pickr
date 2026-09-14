@@ -8,12 +8,11 @@ Let users refresh open pickers on demand to see current statuses and metadata wh
 
 ### Requirement: Manual refresh is available in every picker
 
-All eight picker variants SHALL bind the resolved refresh action keys, defaulting to `Ctrl+L`, to refresh the current variant's complete candidate list from current Herdr data without closing the popup. With `keys.refresh: []`, every variant SHALL have no refresh shortcut or refresh hint, and the default refresh key SHALL NOT be restored. Otherwise, the footer SHALL advertise the resolved refresh bindings when hints are shown. Refresh SHALL retain the variant and original workspace scope, plus the original tab for panes-tab, and SHALL update membership, displayed metadata, statuses, counts, directories, column alignment, and preview targets together using the launch's resolved theme. Refresh SHALL NOT focus a workspace, tab, or pane or run periodically.
+Every type at every supported effective scope SHALL use resolved refresh keys, default Ctrl+L, to rebuild its complete list from current Herdr data without closing the popup. Disabled refresh SHALL have no shortcut/hint and its default SHALL not return on transitions. Visible hints SHALL advertise effective keys. Refresh SHALL retain type, chosen/effective scope, immutable workspace/tab origin, query, current preview visibility, and launch settings. It SHALL publish membership, metadata, statuses, counts, directories, alignment, and preview targets together using resolved columns/theme. It SHALL not focus an entity, run periodically, or broaden/rebind scope when origin/candidates are missing.
 
 #### Scenario: Refresh each variant
-- **WHEN** the user presses any configured refresh key in current-space tabs, all-spaces tabs, spaces, current-space agents, all-spaces agents, current-tab panes, current-space panes, or all-spaces panes
-- **THEN** that same variant fetches and displays its current candidates
-- **AND** current-space variants remain scoped to the popup's original workspace and panes-tab to its original tab
+- **WHEN** refresh is invoked in Spaces, either Tabs scope, or any Panes/Agents scope
+- **THEN** the same effective scope is refreshed under immutable origin, retaining chosen scope even during fallback
 - **AND** no underlying workspace, tab, or pane is focused by refreshing
 
 #### Scenario: Metadata and membership change
@@ -33,13 +32,14 @@ All eight picker variants SHALL bind the resolved refresh action keys, defaultin
 
 ### Requirement: Loading replaces selectable results
 
-While a refresh is fetching or preparing refreshed results, the picker SHALL replace the previous candidate list with a visible, non-selectable `Refreshing…` indicator and retain its column header. No configured acceptance key, default fzf acceptance alias, or inherited binding SHALL accept an entry during this state or defer acceptance until after loading. The search query and preview visibility SHALL be preserved; query edits made while loading SHALL remain effective after completion. Configured closing and any enabled preview-toggling and variant-switching shortcuts SHALL remain available. Disabled optional shortcuts SHALL remain disabled and absent from hints throughout loading and completion.
+While fetching/preparing refreshed results, Pickr SHALL replace old candidates with a visible non-selectable `Refreshing…` state, retaining column headings and scope state. Configured acceptance, built-in acceptance aliases, and inherited bindings SHALL NOT accept or defer acceptance. Query and preview visibility SHALL remain, including edits/toggles during loading. Configured closing, enabled preview toggling, picker switches, and supported scope switches SHALL remain available. Disabled actions SHALL remain disabled; unsupported scope keys SHALL remain no-ops. Loading completion SHALL not overwrite later query edits.
 
 #### Scenario: Slow refresh
 - **WHEN** a refresh has started but its results are not ready
 - **THEN** the previous rows are not displayed as candidates and `Refreshing…` is visible
 - **AND** pressing any configured acceptance key causes no focus operation or deferred acceptance
 - **AND** the query remains intact and a hidden preview does not become visible
+- **AND** scope/header state remains intact until publication
 
 #### Scenario: Edit query during refresh
 - **WHEN** the user edits the search query while refreshing
@@ -73,7 +73,7 @@ On successful refresh, the picker SHALL apply its existing ordering and filterin
 
 ### Requirement: Refresh failure is retryable without stale candidates
 
-A failed or timed-out refresh SHALL show a non-selectable error state with a retry hint containing the resolved refresh key or keys instead of restoring old candidates. The picker SHALL preserve its query and preview visibility and allow retry and closing through their configured keys, plus any enabled preview-toggling and variant-switching shortcuts. Error-state hints SHALL NOT advertise disabled actions, and failure or retry SHALL NOT restore their default bindings. Acceptance SHALL remain disabled after failure. A successful retry SHALL use the same identity-restoration rules, retaining the pre-refresh highlighted ID as the restoration target until successful completion or variant exit.
+A failed/timed-out refresh SHALL show a non-selectable failure and retry hint using effective enabled refresh keys, without restoring stale rows or erasing scope state. Query, chosen/effective scope, origin, and current preview visibility SHALL remain. Closing, retry, enabled preview/type actions, and supported scope actions SHALL remain usable without reviving disabled defaults. Acceptance SHALL stay disabled. Successful retry SHALL restore the pre-refresh identity if matched, otherwise first match or none, retaining recovery identity until successful completion or transition.
 
 #### Scenario: Failed fetch followed by retry
 - **WHEN** refreshing fails or times out
@@ -82,13 +82,13 @@ A failed or timed-out refresh SHALL show a non-selectable error state with a ret
 - **AND** pressing any configured refresh key retries and restores the previous ID if it remains a match after success
 
 #### Scenario: Failure with optional controls disabled
-- **WHEN** refresh fails in a launch with preview-toggling and variant-switching shortcuts disabled
+- **WHEN** refresh fails in a launch with preview/type/scope shortcuts disabled
 - **THEN** configured retry and closing remain available
-- **AND** disabled preview and variant shortcuts remain absent from bindings and hints after failure and successful retry
+- **AND** disabled shortcuts remain absent from bindings and hints after failure and successful retry, while scope labels remain visible
 
 ### Requirement: Refresh work belongs to one active picker
 
-The picker SHALL permit at most one active refresh request. Additional presses of any configured refresh key during loading SHALL be ignored rather than queued. Closing the picker or switching variants SHALL cancel pending refresh work and discard its results, so an old refresh cannot update a destination picker or delay closing until the fetch timeout. Switching during refresh loading or after refresh failure SHALL save the source variant's latest query and pre-refresh highlighted ID as its view memory, rather than saving the non-selectable loading/error state. The destination SHALL restore its own remembered query and selection, or first-visit defaults, against fresh candidates under the original workspace scope, preserving the source's current preview visibility. Returning to the source SHALL restore its memory against fresh candidates rather than resume the cancelled refresh or restore its old loading/error state.
+At most one refresh SHALL be active; further refresh presses during loading SHALL be ignored. Closing or a type/effective-scope transition SHALL cancel source work and discard late results without waiting for the timeout. Transitions during loading/error SHALL save latest query and pre-refresh recovery ID in source type memory, not loading placeholders. Type changes SHALL restore destination type memory or first-visit defaults; scope changes SHALL carry source query/recovery identity into the new scope. Destinations SHALL fetch fresh candidates under immutable origin and current chosen/effective scope, preserving preview visibility. Returning SHALL not resume old refresh/error state. Successful ready fallback/no-match results SHALL supersede older recovery IDs for subsequent memory capture.
 
 #### Scenario: Repeated refresh key presses
 - **WHEN** the user presses one or more configured refresh keys repeatedly while a refresh is pending
@@ -101,13 +101,13 @@ The picker SHALL permit at most one active refresh request. Additional presses o
 
 #### Scenario: Switch variants during refresh
 - **WHEN** the user invokes a configured variant-switching shortcut while refreshing
-- **THEN** the source saves its latest query and pre-refresh highlighted ID, and the destination opens with its own remembered query and selection or first-visit defaults and the original workspace scope
+- **THEN** the source saves its latest query and recovery ID, and the destination opens with its own type memory or first-visit defaults under the carried scope
 - **AND** both shown and hidden preview states are preserved, including any preview toggle made while refreshing
 - **AND** the source refresh is cancelled and cannot modify the destination list or selection
 
 #### Scenario: Switch variants after refresh failure
 - **WHEN** the user invokes a configured variant-switching shortcut after a refresh fails or times out
-- **THEN** the source saves its latest query and pre-refresh highlighted ID, and the destination opens with its own remembered query and selection or first-visit defaults and the original workspace scope
+- **THEN** the source saves its latest query and recovery ID, and the destination opens with its own type memory or first-visit defaults under the carried scope
 - **AND** it preserves the source variant's current shown/hidden preview state, including any toggle made in the error state, rather than reapplying the configured launch default
 
 #### Scenario: Edit during refresh and return after switching away
@@ -121,9 +121,13 @@ The picker SHALL permit at most one active refresh request. Additional presses o
 - **THEN** view memory restores the query and entity highlighted at switch time rather than an older pre-refresh ID
 - **AND** a successful refresh with no matches saves no selected entity
 
+#### Scenario: Change scope during refresh
+- **WHEN** Panes refresh is pending and the user broadens scope
+- **THEN** source work is cancelled, the latest query and recovery pane ID are used against fresh broader candidates, and late source results cannot replace them
+
 ### Requirement: Pane refresh shares identity recovery and cancellation semantics
 
-All three pane variants SHALL use the existing query/preview-preserving, non-selectable loading/error, retry, identity-restoration, and cancellation behavior. Successful refresh SHALL preserve the pane view's workspace/tab/layout order and restore the selected pane ID only if still eligible and matched, otherwise the first match or no selection. Switching during refresh or failure SHALL save the latest query and recovery pane ID in that pane variant's independent memory, cancel pending work, and restore the destination's own memory or first-visit defaults. Returning SHALL fetch fresh candidates under the original scope without reviving the old loading/error state.
+Panes at every scope SHALL share the query/preview-preserving, non-selectable loading/error, retry, identity-restoration, and cancellation behavior. Successful refresh SHALL preserve workspace/tab/layout ordering and select the same pane only if eligible and matched, otherwise first match or none. Type/scope transitions SHALL use the single Panes memory slot with latest query/recovery ID. Fresh candidates SHALL reflect moves/deletions under immutable origin without broadening narrow scopes.
 
 #### Scenario: Pane moves outside the original tab
 - **WHEN** the selected pane moves to another tab and panes-tab is refreshed
@@ -131,8 +135,8 @@ All three pane variants SHALL use the existing query/preview-preserving, non-sel
 - **AND** refreshing panes-all can still include the moved pane under its current tab
 
 #### Scenario: Failed refresh and switch round trip
-- **WHEN** a pane refresh is loading or failed, the user edits the query, switches away, and returns
-- **THEN** its edited query and recovery pane ID are restored against fresh eligible candidates
+- **WHEN** a pane refresh is loading or failed, the user edits the query and changes scope
+- **THEN** the same Panes query/recovery ID is evaluated against fresh destination candidates
 - **AND** stale work cannot update another variant or make a placeholder selectable
 
 #### Scenario: Repeated refresh and close

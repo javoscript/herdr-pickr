@@ -13,16 +13,18 @@ if arg[1] == "control" and arg[2] and arg[3] then
   return
 end
 
-local kinds = { tabs = { current = true, all = true }, workspaces = { current = true, all = true },
-  agents = { current = true, all = true }, panes = { tab = true, current = true, all = true } }
-if not kinds[arg[1]] or not kinds[arg[1]][arg[2]] or arg[3] then
-  io.stderr:write("Usage: lua src/main.lua tabs|workspaces|agents current|all\n"
-    .. "       lua src/main.lua panes tab|current|all\n"
+local valid, kind, scope = pcall(function()
+  assert(not arg[3], "Too many picker arguments")
+  return require("pickr.pickers").launch(arg[1], arg[2])
+end)
+if not valid then
+  io.stderr:write(tostring(kind) .. "\nUsage: lua src/main.lua spaces\n"
+    .. "       lua src/main.lua tabs|panes|agents [all|space|tab]\n"
     .. "       lua src/main.lua preview <pane-id>\n")
   os.exit(2)
 end
 
-local ok, err = pcall(function() require("pickr.core").pick(arg[1], arg[2]) end)
+local ok, err = pcall(function() require("pickr.core").pick(kind, scope) end)
 if not ok then
   io.stderr:write("Pickr failed: " .. tostring(err) .. "\n")
   if uv.guess_handle(0) == "tty" then

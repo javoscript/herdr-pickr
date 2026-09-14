@@ -78,12 +78,12 @@ local function rows(scope, data, tab, workspace, settings)
   return core.snapshot_candidates(data or snapshot, "panes", scope, workspace or "parent", settings, tab)
 end
 equal(ids(rows("tab", nil, "A")), "p1,p2,p3,p4")
-equal(ids(rows("current")), "p5,p1,p2,p3,p4")
+equal(ids(rows("space")), "p5,p1,p2,p3,p4")
 equal(ids(rows("all")), "p5,p1,p2,p3,p4,p6,p9,p7,p8")
 equal(#rows("tab"), 0)
 equal(#rows("tab", nil, "D"), 0)
 equal(#rows("tab", nil, "deleted"), 0)
-equal(#rows("current", nil, nil, "deleted"), 0)
+equal(#rows("space", nil, nil, "deleted"), 0)
 local original_status = p2.agent_status
 p2.agent_status = "done"
 equal(ids(rows("all")), "p5,p1,p2,p3,p4,p6,p9,p7,p8")
@@ -91,6 +91,42 @@ p2.agent_status = original_status
 origin_layout.panes[2].rect = { x = 0, y = 0, width = 0, height = 0 }
 equal(ids(rows("tab", nil, "A")), "p1,p2,p3,p4")
 print("Pane membership: three scopes, grouped worktrees/tab/layout order, unique IDs, agent/plugin inclusion, popup/orphan/mismatch exclusion and zoom OK")
+
+do
+  local saved = snapshot.agents
+  local function agent(id, tab, status, sequence, workspace)
+    return { pane_id = id, workspace_id = workspace or "parent", tab_id = tab,
+      agent = "fixture", agent_status = status, state_change_seq = sequence }
+  end
+  snapshot.agents = {
+    agent("p2", "A", "blocked", 9), agent("p4", "A", "blocked", 9),
+    agent("p5", "B", "blocked", 10), agent("p7", "D", "done", 100, "other"),
+    agent("p1", "B", "blocked", 100), agent("popup", "A", "blocked", 100),
+    agent("orphan", "A", "blocked", 100), agent("mismatch", "A", "blocked", 100),
+  }
+  local function agents(tab, workspace, data)
+    return core.snapshot_candidates(data or snapshot, "agents", "tab", workspace or "parent", nil, tab)
+  end
+  local selected = agents("A")
+  equal(ids(selected), "p2,p4") -- Exact ties keep original agent order; ordinary panes stay out.
+  for _, row in ipairs(selected) do
+    local id, preview = row:match("^([^\t]+)\t([^\t]+)")
+    equal(id, preview)
+  end
+  equal(ids(agents("B")), "p5")
+  equal(#agents(), 0)
+  equal(#agents("D"), 0)
+  equal(#agents("A", "deleted"), 0)
+  local deleted = json.decode(json.encode(snapshot))
+  table.remove(deleted.tabs, 3)
+  equal(#agents("A", nil, deleted), 0)
+  snapshot.agents[1], snapshot.agents[2] = snapshot.agents[2], snapshot.agents[1]
+  equal(ids(agents("A")), "p4,p2")
+  snapshot.agents[1].agent_status = "idle"
+  equal(ids(agents("A")), "p2,p4")
+  snapshot.agents = saved
+end
+print("Agents-tab: exact layout/metadata membership, cross-tab and ordinary-pane exclusion, missing origins, priority/ties and preview IDs OK")
 
 local settings = config.decode('{"theme":{"custom":{"annotation":"red"}}}')
 local rendered, header = rows("tab", nil, "A", nil, settings)
@@ -106,11 +142,11 @@ for _, row in ipairs(rendered) do
   equal(id, preview)
   assert(not display:find("[\n\r\t]"))
 end
-local single = config.decode('{"columns":{"panes_tab":["title"]}}')
+local single = config.decode('{"columns":{"panes":["title"]}}')
 equal(plain(rows("tab", nil, "A", nil, single)[4]), "p4\tp4\t-")
-single = config.decode('{"columns":{"panes_tab":["pane"]}}')
+single = config.decode('{"columns":{"panes":["pane"]}}')
 equal(plain(rows("tab", nil, "A", nil, single)[4]), "p4\tp4\tp4")
-single = config.decode('{"columns":{"panes_tab":["directory"]}}')
+single = config.decode('{"columns":{"panes":["directory"]}}')
 equal(plain(rows("tab", nil, "A", nil, single)[3]), "p3\tp3\t—")
 assert(rows("all", nil, nil, nil, settings)[6]:find(themes.ansi(settings.roles.annotation) .. "[project]", 1, true))
 print("Pane metadata: title/cwd fallbacks, unknown status, Unicode/control cleaning, truncation and annotation roles OK")
@@ -143,6 +179,14 @@ runtime.run_picker = function(_, _, _, _, session)
 end
 core.pick("panes", "all", settings)
 equal(table.concat(focus), "p7")
+focus = {}
+runtime.run_picker = function(_, _, _, _, session)
+  equal(ids(session.rows), "p2")
+  assert(core.preview("p2"):find("screen p2", 1, true))
+  return 0, runtime.picker_result("\0\0" .. session.rows[1] .. "\0", session), "", 0
+end
+core.pick("agents", "tab", settings)
+equal(table.concat(focus), "p2")
 assert(core.preview("closed"):find("Preview unavailable", 1, true))
 for _, response in ipairs({ {}, { pane = { pane_id = "wrong" } } }) do
   runtime.socket_request = function() return response end
@@ -162,10 +206,12 @@ for _, absent in ipairs({ false, true }) do
     equal(session.popup.origin.tab_id, not absent and "A" or nil)
     if visits == 1 then
       env.PICKR_ORIGIN_TAB_ID = "D" -- Changed ambient focus/handoff must not be recaptured.
-      return 1, { key = "alt-1", query = "source" }, "", 0
+      return 1, { key = "ctrl-r", query = "source" }, "", 0
+    elseif visits == 2 then
+      return 1, { key = "ctrl-c", query = "" }, "", 0
     end
     equal(ids(session.rows), absent and "" or "p1,p2,p3,p4")
-    assert(table.concat(args, "\n"):find("--border-label=Panes in this tab", 1, true))
+    assert(table.concat(args, "\n"):find("--border-label=Panes", 1, true))
     local fresh = json.decode(json.encode(snapshot))
     fresh.workspaces[2].active_tab_id = "B"
     equal(ids(render(fresh)), absent and "" or "p1,p2,p3,p4")
@@ -175,21 +221,23 @@ for _, absent in ipairs({ false, true }) do
     equal(#render(fresh), 0)
     return 130, {}, "", 0
   end
-  core.pick("tabs", "all", settings)
-  equal(visits, 2)
+  core.pick("spaces", "all", settings)
+  equal(visits, 3)
 end
 print("Pane origin/focus: immutable non-pane launch handoff, explicit absence, deleted origin, exact inactive split preview/focus and rejected targets OK")
 
--- Fresh scope membership after a move; pane/agent and pane-scope memories are
--- independent even when all four views highlight exactly the same pane ID.
+-- Fresh scope membership after a move; Panes scopes share memory while Agents
+-- remains independent even when both types highlight exactly the same pane ID.
 env.PICKR_ORIGIN_TAB_ID = "A"
-local sequence = { "panes_tab", "panes_current", "panes_all", "agents_current",
-  "panes_tab", "panes_current", "panes_all", "agents_current", "panes_all" }
+local sequence = { { "panes", "tab" }, { "panes", "space" }, { "panes", "all" }, { "agents", "all" },
+  { "panes", "all" }, { "panes", "tab" }, { "agents", "tab" }, { "panes", "tab" } }
 local keymap = require("pickr.keymap")
 local visits, seen = 0, {}
 runtime.run_picker = function(_, args, _, _, session, render)
   visits = visits + 1
-  local variant = sequence[visits]
+  local variant, scope = table.unpack(sequence[visits])
+  equal(session.kind, variant)
+  equal(session.popup.chosen_scope, scope)
   local query
   for _, option in ipairs(args) do query = option:match("^%-%-query=(.*)$") or query end
   equal(query, seen[variant] and variant or nil)
@@ -199,17 +247,17 @@ runtime.run_picker = function(_, args, _, _, session, render)
   assert(selected)
   local generation = session:begin_refresh("p2")
   assert(session:fail(generation))
-  equal(runtime.picker_result("edited\0alt-3\0", session).selected_id, "p2")
+  equal(runtime.picker_result("edited\0ctrl-z\0", session).selected_id, "p2")
   generation = session:begin_refresh(nil)
   local fresh = json.decode(json.encode(snapshot))
   fresh.panes[2].tab_id = "B"
   fresh.layouts[2].panes[#fresh.layouts[2].panes + 1] = { pane_id = "p2" }
   local refreshed, heading = render(fresh)
   assert(session:publish(generation, refreshed, heading))
-  if variant == "panes_tab" then
+  if variant == "panes" and scope == "tab" then
     assert(not ids(refreshed):find("p2", 1, true))
     assert(not session:accept(selected))
-  elseif variant:match("^panes") then
+  elseif variant == "panes" then
     equal(ids(refreshed):sub(1, #"p5,p2"), "p5,p2")
   end
   generation = session:begin_refresh(nil)
@@ -218,10 +266,11 @@ runtime.run_picker = function(_, args, _, _, session, render)
   assert(not session:fail(generation))
   seen[variant] = true
   local next_view = sequence[visits + 1]
-  return next_view and 1 or 130, { key = next_view and keymap.defaults[next_view][1] or "",
+  local action = next_view and (next_view[1] == variant and "scope_" .. next_view[2] or next_view[1])
+  return next_view and 1 or 130, { key = action and keymap.defaults[action][1] or "",
     query = variant, selected_id = "p2" }, "", 0
 end
 core.pick("panes", "tab", settings)
 equal(visits, #sequence)
 os.getenv = getenv
-print("Pane lifecycle: independent scope/agent memory, fresh moves, retry identity, acceptance maps and rejection of late generations OK")
+print("Pane lifecycle: shared scope/independent agent memory, fresh moves, retry identity, acceptance maps and rejection of late generations OK")

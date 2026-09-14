@@ -17,7 +17,7 @@ The plugin SHALL declare `platforms = ["macos"]` and document macOS as its only 
 
 ### Requirement: Distribution is self-contained and relocatable
 
-The repository SHALL contain all Lua source required by the plugin except the documented externally installed Lua runtime and luv dependency. With documented dependencies installed, all five picker actions, direct picker launches, previews, and regression checks SHALL work without source files outside the checkout or a prescribed checkout name or parent directory.
+The repository SHALL contain all required Lua source except documented external Lua/luv dependencies. With documented dependencies installed, every supported picker action/pane preset, direct picker invocation, preview, and regression check SHALL work without outside source helpers or a prescribed checkout name/parent directory.
 
 #### Scenario: Isolated checkout
 - **WHEN** the regression suite is run from a checkout with no shared Lua helpers in its parent directories
@@ -30,28 +30,27 @@ The repository SHALL contain all Lua source required by the plugin except the do
 
 ### Requirement: Public plugin identity is consistent
 
-The plugin SHALL declare ID `javoscript.herdr-pickr` and display name `Herdr Pickr`. Its five existing actions SHALL be invocable under that plugin ID, and popup creation and invocation-context handling SHALL use that identity consistently.
+Pickr SHALL retain ID `javoscript.herdr-pickr` and display name `Herdr Pickr`. All twelve action/pane presets defined by the shared scope contract SHALL use that identity consistently in registration, popup creation, and invocation-context handling. `-current` registrations SHALL be removed, not retained as aliases. Type/scope transitions SHALL preserve originating workspace and available tab.
 
 #### Scenario: Invoke a public action
-- **WHEN** `javoscript.herdr-pickr.tabs-current` is invoked from a workspace
-- **THEN** the plugin opens its current-space tabs popup
-- **AND** switching picker variants preserves the originating workspace
+- **WHEN** `javoscript.herdr-pickr.tabs-space` is invoked
+- **THEN** Tabs opens with This space chosen and preserves its launch origin through transitions
 
 #### Scenario: Open a plugin entrypoint directly
 - **WHEN** a pane entrypoint is opened with `HERDR_PLUGIN_ID=javoscript.herdr-pickr` and valid plugin invocation context
-- **THEN** the plugin recognizes that context for current-space selection
+- **THEN** that context supplies immutable origin for both space and tab scoping where applicable
 
 ### Requirement: User-facing installation and configuration are documented
 
-The README SHALL prioritize feature discovery, installation, and complete user configuration. It SHALL highlight all five picker variants, visible-screen previews, searchable contextual information, agent statuses and worktree grouping, in-popup switching and manual refresh, and appearance/control customization. Behavior descriptions SHALL remain concise and distinguish screen snapshots from streaming previews and query-preserving refresh from query-resetting variant switches.
+README SHALL prioritize feature discovery, installation, and complete configuration. Features SHALL describe four picker types, supported scopes, direct presets, visible-screen snapshot previews rather than streams, searchable contextual fields, agent priority/worktree grouping, in-popup type/scope switching, manual refresh, and appearance/control customization. It SHALL explain popup-local per-type query/selection memory, scope query continuity, chosen-scope fallback/restoration, origin-based rather than highlighted-item scoping, and first-match fallback.
 
-Installation SHALL present https://github.com/javoscript/herdr-pickr as the published distribution and `herdr plugin install javoscript/herdr-pickr` as the installation command without pre-publication caveats. The README SHALL identify macOS support and required Herdr, Lua, luv, fzf, and Git dependencies, state compatibility minimums, include dependency installation steps, explain the matching Lua/luv and Herdr PATH requirements, and show a public action invocation from inside Herdr.
+Installation SHALL retain the published GitHub URL and `herdr plugin install javoscript/herdr-pickr`, supported dependency minimums, Herdr/Lua/luv/fzf/Git setup, matching Lua/luv and inherited PATH requirements, and a valid first launch from inside Herdr, without private directory assumptions or unperformed verification claims.
 
-Configuration SHALL distinguish suggested Herdr launch keybindings in Herdr's `config.toml` from Pickr customization in its Herdr-managed `config.json`. It SHALL provide complete launch-binding examples for all five actions, state that bindings are not installed automatically, explain Herdr config reload, show `herdr plugin config-dir javoscript.herdr-pickr`, and explain creating the optional file and reopening Pickr to adopt edits.
+Configuration SHALL distinguish suggested Herdr `config.toml` launch bindings from managed Pickr `config.json`, explain that bindings are not automatically installed, Herdr reload versus reopening Pickr, `herdr plugin config-dir javoscript.herdr-pickr`, and partial config/default semantics. It SHALL list all twelve supported presets, explain unqualified all defaults and `-all`/`-space`/`-tab`, and provide working binding examples covering the four types and explicit scopes.
 
-The configuration reference SHALL document every supported setting and its defaults, accepted values, inheritance or replacement rules, and relevant validation constraints. This SHALL include all popup action mappings, popup width and height, initial preview visibility, all named themes and semantic color roles with accepted color formats, and the global and five per-variant prompt settings delivered by `configure-search-prompt`. Prompt documentation SHALL match implemented behavior before publication. The reference SHALL explain fzf compatibility, inherited-binding sources and precedence, the complete supported action inventory, unsupported bindings/events and their diagnostics, and the limitation that unrelated ambient fzf options are ignored.
+The reference SHALL document complete defaults/accepted values/replacement and inheritance/validation for all eleven actions, popup dimensions/hint visibility, preview default, named themes/semantic colors, global/four-type prompts, and four-type stable column lists. It SHALL explain scope state surviving hidden hints, remappable scope/type keys, Ctrl+C's new scope role and Esc closing, inherited fzf sources/precedence/supported action inventory, unsupported bindings/events diagnostics, and ignored unrelated options. Examples SHALL match implemented behavior and remain concise without duplicate setup/lifecycle explanations.
 
-The README SHALL omit the Development, Migrate from `local.pickr`, Picker behavior, Regression checks, Two-row footer live acceptance, and Compatibility verification sections and their development, migration, implementation-inventory, and historical verification material. Useful user configuration previously nested under Picker behavior SHALL be retained in the configuration reference. The README SHALL avoid repeated setup instructions and repeated configuration lifecycle explanations. It SHALL NOT claim unperformed compatibility verification. Development linking, migration guidance, regression procedures, and historical platform/version result tables are not required README content.
+A concise user migration subsection SHALL explain removal of all `-current` launch names in favor of `-space`, manual consolidation of old scope-specific config into four type leaves, separate scope actions, and resolving Ctrl+C close/scope collisions. It SHALL not claim automatic migration or legacy aliases. Historical development, compatibility result tables, and implementation inventories SHALL remain outside the user guide; this scoped migration guidance SHALL not revive obsolete `local.pickr` migration instructions.
 
 #### Scenario: First-time installation
 - **WHEN** a user follows the README on macOS
@@ -60,7 +59,7 @@ The README SHALL omit the Development, Migrate from `local.pickr`, Picker behavi
 
 #### Scenario: Configure launch keys and popup settings
 - **WHEN** a user follows the configuration instructions
-- **THEN** complete examples identify all five Herdr actions and the file used for launch bindings
+- **THEN** the action table and examples identify all twelve presets and the file used for launch bindings, including `panes-tab` and `agents-space`
 - **AND** the user can discover the plugin configuration directory and create a valid partial `config.json`
 - **AND** the instructions distinguish reloading Herdr bindings from reopening Pickr after customization
 
@@ -77,8 +76,12 @@ The README SHALL omit the Development, Migrate from `local.pickr`, Picker behavi
 #### Scenario: Read a focused user guide
 - **WHEN** a user scans the README
 - **THEN** feature highlights lead into installation and configuration
-- **AND** the removed sections, historical result tables, and development/migration procedures do not interrupt the guide
+- **AND** concise current migration guidance is provided without historical development/result inventories or obsolete local.pickr migration sections
 - **AND** user-facing configuration previously nested in removed sections remains discoverable
+
+#### Scenario: Migrate existing setup
+- **WHEN** a user upgrades from scope-specific configuration and `-current` bindings
+- **THEN** documentation supplies the replacement action/field names, manual conflict-resolution guidance, and new Ctrl+C/Esc behavior without suggesting old aliases still work
 
 ### Requirement: Distribution includes license and dependency attribution
 

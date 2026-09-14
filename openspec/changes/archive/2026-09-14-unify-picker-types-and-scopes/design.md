@@ -84,7 +84,7 @@ Alternative: Auto-hide redundant columns, which changes searchable fields while 
 
 ### 5. Keep stable scope state near the query and four type hints below
 
-Use a non-selectable header/status area below the reverse-layout prompt, ahead of column headings and candidates. Render All spaces, This space, This tab in fixed order, emphasize effective scope, and dim unsupported labels and their configured shortcut hints. Spaces has none selected. For fallback, append a short explicit remembered-choice note, e.g. `This tab remembered`, so the effective highlight is not mistaken for lost intent. Exact padding and emphasis are presentation details for PTY verification.
+Use a non-selectable header/status area below the reverse-layout prompt, ahead of column headings and candidates. Render All spaces, This space, This tab in fixed order on one clipping row, emphasize effective scope, and dim unsupported labels and their configured shortcut hints. Spaces has none selected. For fallback, put a short explicit remembered-choice note, e.g. `This tab remembered`, on its own non-selectable line immediately below the scope row. This uses one additional line during fallback and keeps the note visible with preview shown rather than clipping it off the end of the choices. Refresh/error status follows on a separate line. Exact padding and emphasis are presentation details for PTY verification.
 
 Use fzf's separate header text for scope/status while preserving the existing input-derived column header. Refresh loading/error currently replaces `--header`; centralize header composition so these messages cannot erase the scope row. Reuse semantic theme roles plus bold/dim attributes rather than introducing a palette dependency.
 

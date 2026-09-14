@@ -20,8 +20,9 @@ local snapshot = {
     { pane_id = "p2", tab_id = "t2", workspace_id = "w2", agent = "agent", agent_status = "done" },
   },
 }
-local variants = { { "tabs", "current" }, { "tabs", "all" }, { "workspaces", "all" },
-  { "agents", "current" }, { "agents", "all" }, { "panes", "tab" }, { "panes", "current" }, { "panes", "all" } }
+local variants = { { "tabs", "space" }, { "tabs", "all" }, { "spaces", "all" },
+  { "agents", "tab" }, { "agents", "space" }, { "agents", "all" },
+  { "panes", "tab" }, { "panes", "space" }, { "panes", "all" } }
 local function plain(text) return (text:gsub("\27%[[%d;]*m", "")) end
 local saved_candidates, saved_picker, saved_current = core.candidates, runtime.run_picker, runtime.current_workspace
 local saved_origin = runtime.origin
@@ -60,4 +61,4 @@ for _, variant in ipairs(variants) do
 end
 core.candidates, runtime.run_picker, runtime.current_workspace = saved_candidates, saved_picker, saved_current
 runtime.origin = saved_origin
-print("Themed rendering: eight variants, dark/light/terminal/custom roles, refresh stability, unchanged text/alignment/IDs/filter targets and preview chrome OK")
+print("Themed rendering: nine effective type/scopes, dark/light/terminal/custom roles, refresh stability, unchanged text/alignment/IDs/filter targets and preview chrome OK")

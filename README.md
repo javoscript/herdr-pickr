@@ -15,19 +15,15 @@
   <a href="#fzf-compatibility-and-inherited-bindings">fzf compatibility</a>
 </p>
 
-- 🔎 **Eight views.**
+- 🔎 **Four picker types, shared scopes.**
   - **Spaces** — jump between spaces.
-  - **All tabs** — tabs across every space.
-  - **Tabs here** — tabs in the current space.
-  - **All agents** — agents across every space.
-  - **Agents here** — agents in the current space.
-  - **Panes in this tab** — split terminals in the original tab.
-  - **Panes in this space** — terminals across the original space's tabs.
-  - **Panes in all spaces** — terminals across every space.
+  - **Tabs** — tabs in all spaces or the original space.
+  - **Panes** — split terminals in all spaces, the original space, or the original tab.
+  - **Agents** — agents in all spaces, the original space, or the original tab.
 - 🧭 **Context at a glance.** Search names, directories, and pane labels; keep worktrees grouped.
 - 🚦 **Attention first.** Agent statuses put blocked work and unseen completions up front.
 - 👀 **Peek before you jump.** Color terminal snapshots, right in the popup.
-- ⚡ **Keep your place.** Switch views and refresh without leaving the picker; each view remembers its search and selection.
+- ⚡ **Keep your place.** Switch types, narrow scope, and refresh without leaving the picker; each type remembers its search and selection.
 - 🎨 **Make it yours.** Choose and reorder columns; remap actions and tune themes, colors, prompts, size, and previews.
 
 ---
@@ -108,7 +104,7 @@ herdr plugin install javoscript/herdr-pickr
 From a terminal **inside Herdr**, open the current-space tabs picker:
 
 ```sh
-herdr plugin action invoke javoscript.herdr-pickr.tabs-current
+herdr plugin action invoke javoscript.herdr-pickr.tabs-space
 ```
 
 Move through entries to preview them, then press <kbd>Enter</kbd> to focus a selection or
@@ -119,7 +115,7 @@ Open any pane scope directly using its action:
 
 ```sh
 herdr plugin action invoke javoscript.herdr-pickr.panes-tab
-herdr plugin action invoke javoscript.herdr-pickr.panes-current
+herdr plugin action invoke javoscript.herdr-pickr.panes-space
 herdr plugin action invoke javoscript.herdr-pickr.panes-all
 ```
 
@@ -158,7 +154,7 @@ these suggested entries, replacing existing bindings on the same keys:
 [[keys.command]]
 key = "prefix+r"
 type = "plugin_action"
-command = "javoscript.herdr-pickr.tabs-current"
+command = "javoscript.herdr-pickr.tabs-space"
 description = "pick tabs in current space"
 
 [[keys.command]]
@@ -176,7 +172,7 @@ description = "pick spaces"
 [[keys.command]]
 key = "prefix+a"
 type = "plugin_action"
-command = "javoscript.herdr-pickr.agents-current"
+command = "javoscript.herdr-pickr.agents-space"
 description = "pick agents in current space"
 
 [[keys.command]]
@@ -184,6 +180,12 @@ key = "prefix+shift+a"
 type = "plugin_action"
 command = "javoscript.herdr-pickr.agents-all"
 description = "pick agents in all spaces"
+
+[[keys.command]]
+key = "prefix+p"
+type = "plugin_action"
+command = "javoscript.herdr-pickr.panes-tab"
+description = "pick panes in this tab"
 ```
 
 Reload binding edits:
@@ -193,6 +195,30 @@ herdr server reload-config
 ```
 
 Or choose **reload config** in Herdr's global menu.
+
+All twelve actions have matching Herdr pane entrypoints. Each preset chooses the
+initial type/scope in the same popup; it does not create a separate configuration
+or search-memory slot. Unqualified Tabs, Panes, and Agents default to All spaces.
+
+| Action | Picker | Initial scope |
+| --- | --- | --- |
+| `javoscript.herdr-pickr.spaces` | Spaces | None; remembers All spaces for a later type switch |
+| `javoscript.herdr-pickr.tabs` | Tabs | All spaces |
+| `javoscript.herdr-pickr.tabs-all` | Tabs | All spaces |
+| `javoscript.herdr-pickr.tabs-space` | Tabs | This space |
+| `javoscript.herdr-pickr.panes` | Panes | All spaces |
+| `javoscript.herdr-pickr.panes-all` | Panes | All spaces |
+| `javoscript.herdr-pickr.panes-space` | Panes | This space |
+| `javoscript.herdr-pickr.panes-tab` | Panes | This tab |
+| `javoscript.herdr-pickr.agents` | Agents | All spaces |
+| `javoscript.herdr-pickr.agents-all` | Agents | All spaces |
+| `javoscript.herdr-pickr.agents-space` | Agents | This space |
+| `javoscript.herdr-pickr.agents-tab` | Agents | This tab |
+
+Direct picker syntax is `lua src/main.lua spaces` or
+`lua src/main.lua tabs|panes|agents [all|space|tab]` from a checkout. Tabs supports
+only `all`/`space`; explicit unsupported pairs are rejected. The direct launcher
+`lua src/open.lua <preset>` accepts the action suffixes in the table above.
 
 ### Pickr configuration file
 
@@ -209,17 +235,16 @@ Create `config.json` in that directory. Here is the complete default configurati
 {
   "keys": {
     "accept": ["enter"],
-    "close": ["esc", "ctrl-c"],
+    "close": ["esc"],
     "toggle_preview": ["ctrl-p"],
     "refresh": ["ctrl-l"],
-    "tabs_current": ["ctrl-r"],
-    "tabs_all": ["ctrl-t"],
     "spaces": ["ctrl-s"],
-    "agents_current": ["ctrl-a"],
-    "agents_all": ["ctrl-g"],
-    "panes_tab": ["alt-1"],
-    "panes_current": ["alt-2"],
-    "panes_all": ["alt-3"]
+    "tabs": ["ctrl-t"],
+    "panes": ["ctrl-r"],
+    "agents": ["ctrl-a"],
+    "scope_all": ["ctrl-z"],
+    "scope_space": ["ctrl-x"],
+    "scope_tab": ["ctrl-c"]
   },
   "popup": {
     "width": "80%",
@@ -228,13 +253,9 @@ Create `config.json` in that directory. Here is the complete default configurati
   },
   "columns": {
     "spaces": ["status", "space", "tabs", "directory"],
-    "tabs_current": ["status", "tab", "panes", "directory"],
-    "tabs_all": ["status", "space", "tab", "panes", "directory"],
-    "agents_current": ["status", "tab", "agent", "title", "pane"],
-    "agents_all": ["status", "space", "tab", "agent", "title", "pane"],
-    "panes_tab": ["status", "title", "pane", "directory"],
-    "panes_current": ["status", "tab", "title", "pane", "directory"],
-    "panes_all": ["status", "space", "tab", "title", "pane", "directory"]
+    "tabs": ["status", "space", "tab", "panes", "directory"],
+    "panes": ["status", "space", "tab", "title", "pane", "directory"],
+    "agents": ["status", "space", "tab", "agent", "title", "pane"]
   },
   "preview": {
     "enabled_by_default": true
@@ -246,14 +267,10 @@ Create `config.json` in that directory. Here is the complete default configurati
   "prompt": {
     "default": "Search: ",
     "variants": {
-      "tabs_current": null,
-      "tabs_all": null,
       "spaces": null,
-      "agents_current": null,
-      "agents_all": null,
-      "panes_tab": null,
-      "panes_current": null,
-      "panes_all": null
+      "tabs": null,
+      "panes": null,
+      "agents": null
     }
   }
 }
@@ -275,17 +292,16 @@ work **inside the popup**, without Herdr's prefix.
 | Action | Default keys | Meaning |
 | --- | --- | --- |
 | `accept` | `["enter"]` | Focus the selected entity |
-| `close` | `["esc", "ctrl-c"]` | Close without focusing |
+| `close` | `["esc"]` | Close without focusing |
 | `toggle_preview` | `["ctrl-p"]` | Show or hide the preview |
 | `refresh` | `["ctrl-l"]` | Fetch fresh candidates |
-| `tabs_current` | `["ctrl-r"]` | Tabs in the original current space |
-| `tabs_all` | `["ctrl-t"]` | Tabs in all spaces |
 | `spaces` | `["ctrl-s"]` | All spaces |
-| `agents_current` | `["ctrl-a"]` | Agents in the original current space |
-| `agents_all` | `["ctrl-g"]` | Agents in all spaces |
-| `panes_tab` | `["alt-1"]` | Panes in the original tab |
-| `panes_current` | `["alt-2"]` | Panes in the original space |
-| `panes_all` | `["alt-3"]` | Panes in all spaces |
+| `tabs` | `["ctrl-t"]` | Tabs under the carried scope |
+| `panes` | `["ctrl-r"]` | Panes under the carried scope |
+| `agents` | `["ctrl-a"]` | Agents under the carried scope |
+| `scope_all` | `["ctrl-z"]` | All spaces |
+| `scope_space` | `["ctrl-x"]` | This space: the original space |
+| `scope_tab` | `["ctrl-c"]` | This tab: the original tab and space |
 
 <details>
 <summary>Copy default keymap</summary>
@@ -294,17 +310,16 @@ work **inside the popup**, without Herdr's prefix.
 {
   "keys": {
     "accept": ["enter"],
-    "close": ["esc", "ctrl-c"],
+    "close": ["esc"],
     "toggle_preview": ["ctrl-p"],
     "refresh": ["ctrl-l"],
-    "tabs_current": ["ctrl-r"],
-    "tabs_all": ["ctrl-t"],
     "spaces": ["ctrl-s"],
-    "agents_current": ["ctrl-a"],
-    "agents_all": ["ctrl-g"],
-    "panes_tab": ["alt-1"],
-    "panes_current": ["alt-2"],
-    "panes_all": ["alt-3"]
+    "tabs": ["ctrl-t"],
+    "panes": ["ctrl-r"],
+    "agents": ["ctrl-a"],
+    "scope_all": ["ctrl-z"],
+    "scope_space": ["ctrl-x"],
+    "scope_tab": ["ctrl-c"]
   }
 }
 ```
@@ -317,17 +332,17 @@ work **inside the popup**, without Herdr's prefix.
 - Keys must be unique across all actions, including retained defaults and aliases.
   For example, `enter`/`return`/`ctrl-m` are one key, as are `tab`/`ctrl-i`.
 
-The pane shortcuts default to <kbd>Alt</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>,
-from narrowest to broadest scope. These new defaults take precedence over inherited
-fzf bindings. If an existing Pickr override already uses one of these keys, launch
-reports a conflict. Remap or disable the corresponding pane shortcut, for example:
+**Ctrl+C selects This tab; Esc closes.** Ctrl+Z selects All spaces without suspending
+the picker. Pickr's configured keys take precedence over inherited fzf bindings.
+Conflicting Pickr overrides block launch. Remap or disable type and scope actions
+independently, for example:
 
 ```json
 {
   "keys": {
-    "panes_tab": ["alt-q", "f1"],
-    "panes_current": ["alt-w"],
-    "panes_all": []
+    "panes": ["alt-q", "f1"],
+    "scope_space": ["alt-w"],
+    "scope_all": []
   }
 }
 ```
@@ -360,7 +375,7 @@ syntax, events, and fzf action expressions are not valid Pickr key names.
 
 </details>
 
-Each of the eight views remembers its exact query and highlighted entity for the
+Each of the four picker types remembers its exact query and highlighted entity for the
 lifetime of the open popup. First visits start with an empty query and the first
 match. Returning to a view fetches fresh candidates and restores its query and
 selection by identity, even when labels, ordering, or preview panes have changed.
@@ -368,13 +383,26 @@ If the entity was removed or no longer matches, the first match is highlighted;
 zero matches leave no selection. Invoking the current view's shortcut follows
 the same save-and-restore rule.
 
-Current-space views stay scoped to where the popup was opened. Panes in this tab
-uses the original tab captured at launch, even when opening a non-pane view first.
+Scope changes keep the current type's query and eligible selection. If narrowing
+excludes the selected entity, the first match (or none) becomes the current
+selection; broadening later does not resurrect a separate scope-specific choice.
+Space/tab context columns stay visible and searchable when narrowing.
+
+The popup carries one chosen scope across types. Tabs supports All spaces and
+This space; Panes and Agents also support This tab. Spaces has no effective scope.
+For example, This tab in Panes becomes This space in Tabs and no scope in Spaces,
+then returns to This tab in Agents. The original choice is remembered until you
+explicitly choose another supported scope. Choosing This space while Tabs is
+using that fallback clears the remembered tab preference without restarting the
+list. Unsupported scope keys and reselecting the already chosen scope do nothing.
+
+Narrow scopes stay anchored to where the popup was opened. This tab uses the
+original tab captured at launch, even when opening Spaces first.
 Highlighting another tab/space or focus changes from another client do not change
-that origin. A missing or deleted original tab/space leaves its narrow pane view
+that origin. A missing or deleted original tab/space leaves its narrow scope
 empty and switchable; refresh never rebinds it to a newer active tab. Moving a pane
 out of the original tab removes it on refresh or return, while broader scopes can
-still include it. The three pane scopes and agent views keep independent memory,
+still include it. Panes scopes share one memory slot; Agents has its own slot,
 even for the same pane ID. Preview visibility
 is shared across views, including toggles made during refresh. Closing the popup
 through acceptance, cancellation, or failure discards all view memory; reopening
@@ -392,9 +420,32 @@ Acceptance also waits for selection restoration on view entry; closing, view
 shortcuts, query editing, and enabled preview toggling remain available.
 
 Footer hints show configured aliases and hide disabled actions. Controls occupy
-the first row, view shortcuts the second; long rows clip rather than wrap.
+the first row, the four type shortcuts the second; long rows clip rather than wrap.
+
+### Migrating scope-specific settings and launch bindings
+
+- Rename `tabs-current`, `panes-current`, and `agents-current` Herdr bindings to
+  `tabs-space`, `panes-space`, and `agents-space`, then reload Herdr. The old
+  `-current` registrations have been removed without compatibility aliases.
+  Direct `current` scope arguments likewise become `space`.
+- Under `keys`, `columns`, and `prompt.variants`, manually consolidate
+  `tabs_current`/`tabs_all` into `tabs`, `agents_current`/`agents_all` into `agents`,
+  and `panes_tab`/`panes_current`/`panes_all` into `panes`. Old leaves are rejected
+  even when null or combined with new settings; Pickr does not merge overrides
+  or rewrite configuration. Type shortcuts and scope shortcuts are now separate
+  actions, so an old composite shortcut is not equivalent to a new type shortcut.
+- The default close binding is now Esc only. If your close override includes
+  Ctrl+C, remove it or remap/disable `scope_tab` to resolve the collision.
+  Reopen Pickr after editing its JSON configuration.
 
 ### Keyboard hints
+
+Scope choices appear on one non-selectable row near the search prompt. When a
+picker temporarily uses a broader scope, its remembered choice (for example,
+`This tab remembered`) appears on a separate line immediately below the choices.
+That extra line is shown only during fallback, so the remembered choice remains
+visible with the preview open. Refresh and error messages use a separate line.
+Long scope rows clip instead of wrapping.
 
 Hide the entire keyboard hints section with:
 
@@ -409,36 +460,33 @@ Hide the entire keyboard hints section with:
 `popup.show_hints` defaults to `true`; omitted or null values keep that default.
 Only booleans or null are accepted. Setting it to `false` removes both footer
 rows, their separator, and the empty-list `no entries` prefix, reclaiming that
-space for the list. Keyboard shortcuts still work, and refresh/error messages
-remain visible. The setting applies to all eight views and stays fixed through
+space for the list. Scope shortcut text is also hidden, but scope labels,
+effective/remembered state, and refresh/error messages remain visible. Keyboard
+shortcuts still work. The setting applies to all four picker types and stays fixed through
 switching, refresh, and retry. Close and reopen Pickr to apply edits.
 
 ### Displayed columns
 
-Choose the columns shown in each view and their left-to-right order:
+Choose the columns shown in each type and their left-to-right order:
 
 ```json
 {
   "columns": {
-    "tabs_all": ["tab", "space", "directory"],
-    "agents_current": ["agent", "status", "title"]
+    "tabs": ["tab", "space", "directory"],
+    "agents": ["agent", "status", "title"]
   }
 }
 ```
 
-Each array replaces that view's complete column list. These are the available
+Each array replaces that type's complete column list at every scope. These are the available
 column names, listed in their default order:
 
 | View | Configuration key | Available columns / default order |
 | --- | --- | --- |
 | Spaces | `spaces` | `status`, `space`, `tabs`, `directory` |
-| Tabs here | `tabs_current` | `status`, `tab`, `panes`, `directory` |
-| All tabs | `tabs_all` | `status`, `space`, `tab`, `panes`, `directory` |
-| Agents here | `agents_current` | `status`, `tab`, `agent`, `title`, `pane` |
-| All agents | `agents_all` | `status`, `space`, `tab`, `agent`, `title`, `pane` |
-| Panes in this tab | `panes_tab` | `status`, `title`, `pane`, `directory` |
-| Panes in this space | `panes_current` | `status`, `tab`, `title`, `pane`, `directory` |
-| Panes in all spaces | `panes_all` | `status`, `space`, `tab`, `title`, `pane`, `directory` |
+| Tabs | `tabs` | `status`, `space`, `tab`, `panes`, `directory` |
+| Panes | `panes` | `status`, `space`, `tab`, `title`, `pane`, `directory` |
+| Agents | `agents` | `status`, `space`, `tab`, `agent`, `title`, `pane` |
 
 - Omitted or null `columns` or view values keep the corresponding defaults.
   An empty `columns` object keeps all defaults.
@@ -458,7 +506,7 @@ terminal title, terminal title, or title (`-` when missing), and foreground cwd
 then cwd. Directories use the existing home abbreviation and 48-character limit.
 The pane column displays `pane-id [label]`, omitting brackets for empty labels.
 Pane-label and worktree annotations use the theme's annotation color. Tab/space
-context is available only in the scopes shown above.
+context remains available at every scope; narrowing never automatically hides columns.
 
 Switching views uses the destination's configured columns. Refresh and retry keep
 the session's settings; **close and reopen Pickr to apply configuration edits**.
@@ -481,7 +529,7 @@ include the outer border and are capped at 65535; Herdr clamps to its minimum
 size and available terminal area. Negative or fractional counts, malformed or
 out-of-range percentages, wrong types, and unknown fields are errors.
 
-These dimensions apply to all eight Pickr launch actions. Switching and refresh
+These dimensions apply to all twelve Pickr launch actions. Switching and refresh
 keep the same geometry. Direct `herdr plugin pane open` calls use the manifest's
 80% × 70% defaults; running the picker in an existing terminal does not resize it.
 
@@ -569,21 +617,17 @@ Every view defaults to exactly `"Search: "`, including the trailing space. Set
 }
 ```
 
-Default per-view settings (`null` inherits the global prompt):
+Default per-type settings (`null` inherits the global prompt):
 
 ```json
 {
   "prompt": {
     "default": "Search: ",
     "variants": {
-      "tabs_current": null,
-      "tabs_all": null,
       "spaces": null,
-      "agents_current": null,
-      "agents_all": null,
-      "panes_tab": null,
-      "panes_current": null,
-      "panes_all": null
+      "tabs": null,
+      "panes": null,
+      "agents": null
     }
   }
 }
@@ -597,7 +641,7 @@ Text is literal: spaces, Unicode, quotes, and metacharacters are preserved, neve
 evaluated. NUL, carriage return, and newline are rejected. Invalid types, fields,
 or variant names block launch, even for inactive views.
 
-Switching selects the destination's prompt; refresh and retry keep it unchanged.
+Switching type selects the destination's prompt; scope changes, refresh, and retry keep it unchanged.
 **Text:** `prompt.default`/`prompt.variants`. **Color:** `theme.custom.prompt`.
 
 ### fzf compatibility and inherited bindings
@@ -620,7 +664,7 @@ earlier bindings on the same effective key, including aliases. A leading `+`
 appends to the earlier explicit action chain, not fzf's built-in default binding.
 For example, `--bind 'alt-j:down,alt-k:up'` in either source works when those keys
 are unclaimed. General fzf bindings belong in these sources; Pickr's JSON `keys`
-object only configures the twelve Pickr actions.
+object only configures the eleven Pickr actions.
 
 Quoting, comments, separator keys, and action chains follow fzf 0.74.3 parsing;
 option text is not shell-evaluated or expanded. Only argument-free actions from

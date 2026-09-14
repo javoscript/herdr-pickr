@@ -39,4 +39,14 @@ for variant, columns in pairs(require("pickr.columns").defaults) do
     assert(readme:find("`" .. column .. "`", 1, true), "undocumented column: " .. column)
   end
 end
-print("Documentation: JSON examples validate; every action, theme, role and supported imported action is documented")
+local migration = assert(readme:match("### Migrating scope%-specific settings and launch bindings\n(.-)\n### "))
+local current = readme:gsub("### Migrating scope%-specific settings and launch bindings\n.-\n### ", "### ")
+for old in pairs(require("pickr.pickers").legacy) do
+  assert(migration:find(old, 1, true), "undocumented migration: " .. old)
+  assert(not current:find(old, 1, true), "legacy setting outside migration: " .. old)
+end
+assert(not current:find("-current", 1, true), "legacy launch outside migration")
+for preset in pairs(require("pickr.pickers").presets) do
+  assert(readme:find("| `javoscript.herdr-pickr." .. preset .. "` |", 1, true), "missing preset table row: " .. preset)
+end
+print("Documentation: all JSON examples/defaults and twelve presets validate; settings/themes/imports documented and legacy names confined to migration")

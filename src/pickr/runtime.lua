@@ -142,6 +142,11 @@ end
 function M.run_picker(command, args, input, env, session, render, footer)
   local keymap, map = require("pickr.keymap"), session.settings.keymap
   local function gate(operation, actions) return keymap.gate(map, operation, actions) end
+  local status
+  local function header(message)
+    status = message
+    return session.scope_header and session.scope_header(message) or message or ""
+  end
   local root = assert(uv.fs_mkdtemp("/tmp/pickr-XXXXXX"))
   local socket, data_path, fzf_socket = root .. "/owner.sock", root .. "/rows", root .. "/fzf.sock"
   local server, peers = uv.new_pipe(false), {}
@@ -200,8 +205,8 @@ function M.run_picker(command, args, input, env, session, render, footer)
   local function failed(generation)
     if session:fail(generation) then
       pending, loaded = nil, false
-      post(gate("rebind", { "refresh" }) .. "+change-header:Refresh failed — "
-        .. keymap.display(map.keys.refresh) .. " to retry")
+      post(gate("rebind", { "refresh" }) .. "+change-header:"
+        .. header("Refresh failed" .. (#map.keys.refresh > 0 and " — " .. keymap.display(map.keys.refresh) .. " to retry" or "")))
     end
   end
   local function start_fetch()
@@ -224,11 +229,21 @@ function M.run_picker(command, args, input, env, session, render, footer)
     if request.event == "toggle-preview" then
       session.popup.preview_visible = not session.popup.preview_visible
       return "toggle-preview"
+    elseif request.event == "scope" then
+      local pickers = require("pickr.pickers")
+      local chosen = request.argument
+      if session.kind and pickers.types[session.kind][chosen]
+        and chosen ~= session.popup.chosen_scope
+        and chosen == pickers.effective(session.kind, session.popup.chosen_scope) then
+        session.popup.chosen_scope = chosen
+        return "change-header:" .. header(status)
+      end
+      return ""
     elseif request.event == "refresh" then
       if not session:begin_refresh(request.argument) then return "" end
       pending, loaded, clearing = nil, false, true
       write_rows({}, session.header)
-      return gate("unbind", { "accept", "refresh" }) .. "+change-header(Refreshing…)+" .. reload
+      return gate("unbind", { "accept", "refresh" }) .. "+" .. reload .. "+change-header:" .. header("Refreshing…")
     elseif request.event == "load" then
       if clearing then
         clearing = false
@@ -250,8 +265,15 @@ function M.run_picker(command, args, input, env, session, render, footer)
     elseif request.event == "ready" and pending then
       session:publish(pending.generation, pending.rows, pending.header)
       pending, loaded = nil, false
-      return gate("rebind", { "accept", "refresh" }) .. "+change-header()"
+      header()
+      -- Each arbitrary display string owns the tail of its action expression.
+      -- A separate synchronous transform avoids interpreting punctuation in
+      -- configured key labels as change-footer/header delimiters.
+      return gate("rebind", { "accept", "refresh" })
+        .. "+transform(" .. helper .. " header)"
         .. (footer and "+change-footer:" .. footer(#session.rows) or "")
+    elseif request.event == "header" then
+      return "change-header:" .. header(status)
     end
     return ""
   end
@@ -284,6 +306,15 @@ function M.run_picker(command, args, input, env, session, render, footer)
     end
     for _, key in ipairs(map.keys.refresh) do
       args[#args + 1] = "--bind=" .. key .. ":transform(" .. helper .. " refresh {1})"
+    end
+    if session.kind then
+      local pickers = require("pickr.pickers")
+      local effective = pickers.effective(session.kind, session.popup.chosen_scope)
+      if effective and effective ~= session.popup.chosen_scope then
+        for _, key in ipairs(map.keys["scope_" .. effective]) do
+          args[#args + 1] = "--bind=" .. key .. ":transform(" .. helper .. " scope " .. effective .. ")"
+        end
+      end
     end
     args[#args + 1] = "--bind=load:transform(" .. helper .. " load),result-final:transform(" .. helper .. " match {*f1})"
     fzf = M.spawn(command, args, input, env, nil, function(failure, code, output, errors, signal)
@@ -320,18 +351,31 @@ end
 function M.origin(getenv, snapshot)
   getenv = getenv or os.getenv
   local origin = { workspace_id = M.current_workspace(getenv) }
+  local function validate(tab)
+    if not tab or tab == "" or not origin.workspace_id then return origin end
+    snapshot = snapshot or M.herdr("api", "snapshot").snapshot
+    local workspace_exists = false
+    for _, workspace in ipairs(snapshot.workspaces) do
+      if workspace.workspace_id == origin.workspace_id then workspace_exists = true; break end
+    end
+    for _, member in ipairs(snapshot.tabs) do
+      if workspace_exists and member.tab_id == tab and member.workspace_id == origin.workspace_id then
+        origin.tab_id = tab
+        break
+      end
+    end
+    return origin
+  end
   local tab = getenv("PICKR_ORIGIN_TAB_ID")
   if tab ~= nil then
-    origin.tab_id = tab ~= "" and tab or nil
-    return origin
+    return validate(tab)
   end
   if getenv("HERDR_PLUGIN_ID") == "javoscript.herdr-pickr" then
     local context = getenv("HERDR_PLUGIN_CONTEXT_JSON")
     if context and context ~= "" then
       context = json.decode(context)
       if context.workspace_id == origin.workspace_id and context.tab_id and context.tab_id ~= "" then
-        origin.tab_id = context.tab_id
-        return origin
+        return validate(context.tab_id)
       end
     end
   end
@@ -339,8 +383,7 @@ function M.origin(getenv, snapshot)
     snapshot = snapshot or M.herdr("api", "snapshot").snapshot
     for _, workspace in ipairs(snapshot.workspaces) do
       if workspace.workspace_id == origin.workspace_id then
-        origin.tab_id = workspace.active_tab_id ~= "" and workspace.active_tab_id or nil
-        break
+        return validate(workspace.active_tab_id)
       end
     end
   end

@@ -6,10 +6,10 @@ description = "Fuzzy tab, space, agent, and pane pickers with terminal previews.
 platforms = ["macos", "linux"]
 
 [[actions]]
-id = "tabs-current"
-title = "Pickr: tabs in current space"
+id = "tabs-space"
+title = "Pickr: tabs in this space"
 contexts = ["global"]
-command = ["lua", "src/open.lua", "tabs-current"]
+command = ["lua", "src/open.lua", "tabs-space"]
 
 [[actions]]
 id = "tabs-all"
@@ -24,10 +24,10 @@ contexts = ["global"]
 command = ["lua", "src/open.lua", "spaces"]
 
 [[actions]]
-id = "agents-current"
-title = "Pickr: agents in current space"
+id = "agents-space"
+title = "Pickr: agents in this space"
 contexts = ["global"]
-command = ["lua", "src/open.lua", "agents-current"]
+command = ["lua", "src/open.lua", "agents-space"]
 
 [[actions]]
 id = "agents-all"
@@ -42,10 +42,10 @@ contexts = ["global"]
 command = ["lua", "src/open.lua", "panes-tab"]
 
 [[actions]]
-id = "panes-current"
+id = "panes-space"
 title = "Panes in this space"
 contexts = ["global"]
-command = ["lua", "src/open.lua", "panes-current"]
+command = ["lua", "src/open.lua", "panes-space"]
 
 [[actions]]
 id = "panes-all"
@@ -54,12 +54,12 @@ contexts = ["global"]
 command = ["lua", "src/open.lua", "panes-all"]
 
 [[panes]]
-id = "tabs-current"
+id = "tabs-space"
 title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "src/main.lua", "tabs", "current"]
+command = ["lua", "src/main.lua", "tabs", "space"]
 
 [[panes]]
 id = "tabs-all"
@@ -75,15 +75,15 @@ title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "src/main.lua", "workspaces", "all"]
+command = ["lua", "src/main.lua", "spaces"]
 
 [[panes]]
-id = "agents-current"
+id = "agents-space"
 title = "pickr"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "src/main.lua", "agents", "current"]
+command = ["lua", "src/main.lua", "agents", "space"]
 
 [[panes]]
 id = "agents-all"
@@ -102,12 +102,12 @@ height = "70%"
 command = ["lua", "src/main.lua", "panes", "tab"]
 
 [[panes]]
-id = "panes-current"
+id = "panes-space"
 title = "Panes in this space"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["lua", "src/main.lua", "panes", "current"]
+command = ["lua", "src/main.lua", "panes", "space"]
 
 [[panes]]
 id = "panes-all"
@@ -116,3 +116,59 @@ placement = "popup"
 width = "80%"
 height = "70%"
 command = ["lua", "src/main.lua", "panes", "all"]
+
+[[actions]]
+id = "tabs"
+title = "Pickr: tabs in all spaces"
+contexts = ["global"]
+command = ["lua", "src/open.lua", "tabs"]
+
+[[actions]]
+id = "panes"
+title = "Panes in all spaces"
+contexts = ["global"]
+command = ["lua", "src/open.lua", "panes"]
+
+[[actions]]
+id = "agents"
+title = "Pickr: agents in all spaces"
+contexts = ["global"]
+command = ["lua", "src/open.lua", "agents"]
+
+[[actions]]
+id = "agents-tab"
+title = "Pickr: agents in this tab"
+contexts = ["global"]
+command = ["lua", "src/open.lua", "agents-tab"]
+
+[[panes]]
+id = "tabs"
+title = "pickr"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["lua", "src/main.lua", "tabs"]
+
+[[panes]]
+id = "panes"
+title = "Panes in all spaces"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["lua", "src/main.lua", "panes"]
+
+[[panes]]
+id = "agents"
+title = "pickr"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["lua", "src/main.lua", "agents"]
+
+[[panes]]
+id = "agents-tab"
+title = "Pickr: agents in this tab"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["lua", "src/main.lua", "agents", "tab"]

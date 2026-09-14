@@ -8,24 +8,28 @@ Let users find, preview, and focus ordinary terminal panes within the originatin
 
 ### Requirement: Three pane scopes are directly launchable
 
-Pickr SHALL expose actions and pane entrypoints `panes-tab`, `panes-current`, and `panes-all` under plugin ID `javoscript.herdr-pickr`, titled Panes in this tab, Panes in this space, and Panes in all spaces respectively. Each SHALL open the corresponding picker and SHALL be reachable through its configured in-popup variant shortcut. `panes-tab` SHALL include only panes in the original tab and workspace; `panes-current` SHALL include panes across tabs in the original workspace; `panes-all` SHALL include eligible panes across all workspaces. The five existing actions SHALL retain their names and scopes.
+Pickr SHALL expose `panes`, `panes-all`, `panes-space`, and `panes-tab` actions and matching pane entrypoints under `javoscript.herdr-pickr`. They SHALL open the single Panes type with All spaces, All spaces, This space, and This tab chosen respectively. `panes-current` SHALL be removed. Panes SHALL use the shared picker/scope controls rather than a separate internal shortcut per preset. All spaces SHALL list eligible panes across spaces; This space across all tabs of the original space; This tab only in the original tab and space. Launching or transitioning SHALL not focus an underlying terminal.
 
 #### Scenario: Tab scope
 - **WHEN** panes-tab opens from a tab with three split panes while other tabs also contain panes
 - **THEN** only eligible panes in the originating tab appear
 
 #### Scenario: Space scope
-- **WHEN** panes-current opens from a workspace containing multiple tabs
+- **WHEN** panes-space opens from a workspace containing multiple tabs
 - **THEN** eligible panes from every tab in that workspace appear and panes in other workspaces do not
 
 #### Scenario: Global scope
-- **WHEN** panes-all opens
+- **WHEN** panes or panes-all opens
 - **THEN** eligible panes from every workspace and tab appear, including inactive workspaces
 
 #### Scenario: Direct and internal navigation
-- **WHEN** a pane action is launched directly or its configured shortcut is invoked from another Pickr view
-- **THEN** the requested pane scope opens with its resolved settings
-- **AND** opening or switching the view does not focus an underlying terminal
+- **WHEN** any supported pane preset opens
+- **THEN** it initializes the stated scope with Panes' shared columns/prompt and first-visit memory
+- **AND** type/scope shortcuts are available according to configuration
+
+#### Scenario: Space rename
+- **WHEN** a user migrates a pane launch binding from `panes-current` to `panes-space`
+- **THEN** it retains originating-space membership through the new public name without a legacy alias
 
 ### Requirement: Narrow pane scopes retain launch origin
 
@@ -74,7 +78,7 @@ Pane views SHALL list each eligible pane ID once, including ordinary shells, edi
 
 ### Requirement: Pane rows expose searchable terminal context
 
-Pane views SHALL use each pane's own status, title, pane ID with optional label, and directory, plus scope-appropriate tab and space columns. The title SHALL use the first nonempty value among stripped terminal title, terminal title, and title, falling back to `-`. Directory SHALL use nonempty foreground cwd then cwd with the existing home abbreviation, truncation, and missing-value behavior. A nonempty pane label SHALL be displayed as `pane-id [label]` under `pane [label]`; empty labels SHALL leave the ID alone. Pane-label and worktree annotations SHALL use the existing annotation theme role. Status SHALL use existing glyph/text/color mappings with unknown fallback. Metadata SHALL retain existing single-row control-character cleaning. Only effective visible columns and their annotations SHALL match queries; hidden IDs SHALL remain available for targeting without contributing matches.
+Panes SHALL use the pane's own status, title, pane ID with optional label, and directory, plus space/tab context available at every scope. The configured per-type list SHALL determine visible/searchable columns without scope-based hiding. Title SHALL prefer nonempty stripped terminal title, terminal title, then title, otherwise `-`. Directory SHALL prefer nonempty foreground cwd then cwd with existing home abbreviation, truncation, and missing-value behavior. Nonempty labels SHALL render as `pane-id [label]` under `pane [label]`; empty labels SHALL add no brackets. Pane-label/worktree annotations SHALL retain annotation styling, status SHALL retain existing glyph/text/color mappings and unknown fallback, and metadata SHALL retain single-row control-character cleaning. Only visible columns/annotations SHALL match queries; hidden targeting IDs SHALL not contribute matches.
 
 #### Scenario: Labeled shell without an agent
 - **WHEN** a shell pane has label `test watcher`, no agent, and a foreground directory
@@ -87,9 +91,13 @@ Pane views SHALL use each pane's own status, title, pane ID with optional label,
 - **AND** missing title becomes `-` and an empty label adds no brackets
 
 #### Scenario: Reordered or hidden columns
-- **WHEN** a pane view shows only `directory` and `pane`, in that order
+- **WHEN** `columns.panes` is `["directory", "pane"]` at any scope
 - **THEN** rows and header follow that order and search ignores hidden title/status/tab/space data
 - **AND** selection and preview still target the correct pane ID
+
+#### Scenario: Stable narrow context
+- **WHEN** Panes uses This tab and includes space/tab columns
+- **THEN** those columns render the containing identities and remain searchable
 
 ### Requirement: Preview and acceptance target the exact pane
 

@@ -36,6 +36,7 @@ local function object(value, field, allowed)
     error(field .. ": expected a JSON object", 0)
   end
   for key in pairs(value) do
+    if field == "keys" or field == "prompt.variants" then require("pickr.pickers").check_leaf(field, key) end
     if not allowed[key] then error(field .. "." .. key .. ": unknown setting", 0) end
   end
 end
@@ -159,7 +160,7 @@ end
 -- Only the launcher writes this handoff. Serialize resolved values so the owner
 -- never resolves defaults, discovers a directory, or rereads the configuration.
 function M.snapshot(settings)
-  return json.encode({ version = 1, settings = settings })
+  return json.encode({ version = 2, settings = settings })
 end
 
 function M.owner(deps)
@@ -168,7 +169,7 @@ function M.owner(deps)
   if snapshot == nil then return M.load(deps) end
   local ok, result = pcall(function()
     local handoff = json.decode(snapshot, true)
-    assert(type(handoff) == "table" and handoff.version == 1, "unsupported snapshot version")
+    assert(type(handoff) == "table" and handoff.version == 2, "incompatible settings handoff: unsupported snapshot version")
     local settings = handoff.settings
     assert(type(settings) == "table" and type(settings.keymap) == "table"
       and type(settings.keymap.keys) == "table" and type(settings.keymap.reverse) == "table"

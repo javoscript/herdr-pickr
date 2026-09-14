@@ -1,12 +1,11 @@
 local M = {}
-M.order = { "accept", "close", "toggle_preview", "refresh", "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" }
-M.defaults = { accept = { "enter" }, close = { "esc", "ctrl-c" }, toggle_preview = { "ctrl-p" },
-  refresh = { "ctrl-l" }, tabs_current = { "ctrl-r" }, tabs_all = { "ctrl-t" }, spaces = { "ctrl-s" },
-  agents_current = { "ctrl-a" }, agents_all = { "ctrl-g" },
-  panes_tab = { "alt-1" }, panes_current = { "alt-2" }, panes_all = { "alt-3" } }
-M.variants = { tabs_current = { "tabs", "current" }, tabs_all = { "tabs", "all" },
-  spaces = { "workspaces", "all" }, agents_current = { "agents", "current" }, agents_all = { "agents", "all" },
-  panes_tab = { "panes", "tab" }, panes_current = { "panes", "current" }, panes_all = { "panes", "all" } }
+local pickers = require("pickr.pickers")
+M.order = { "accept", "close", "toggle_preview", "refresh", "spaces", "tabs", "panes", "agents",
+  "scope_all", "scope_space", "scope_tab" }
+M.defaults = { accept = { "enter" }, close = { "esc" }, toggle_preview = { "ctrl-p" },
+  refresh = { "ctrl-l" }, spaces = { "ctrl-s" }, tabs = { "ctrl-t" }, panes = { "ctrl-r" },
+  agents = { "ctrl-a" }, scope_all = { "ctrl-z" }, scope_space = { "ctrl-x" }, scope_tab = { "ctrl-c" } }
+M.variants = pickers.types
 
 -- fzf 0.74.3 parseKeyChords and Unix tui event aliases.
 local aliases = { ["return"] = "enter", ["ctrl-m"] = "enter", ["ctrl-i"] = "tab",
@@ -43,6 +42,7 @@ end
 function M.resolve(overrides)
   overrides = overrides or {}
   for action in pairs(overrides) do
+    pickers.check_leaf("keys", action)
     if not M.defaults[action] then error("keys." .. tostring(action) .. ": unknown action", 0) end
   end
   local result = { keys = {}, reverse = {} }
@@ -72,10 +72,12 @@ function M.display(keys)
   return table.concat(labels, "/")
 end
 
-function M.expect(map)
+function M.expect(map, kind, chosen)
   local keys = {}
   for _, action in ipairs(M.order) do
-    if M.variants[action] then
+    local scope = action:match("^scope_(.+)$")
+    if M.variants[action] or (scope and kind and pickers.types[kind][scope]
+      and scope ~= pickers.effective(kind, chosen)) then
       for _, key in ipairs(map.keys[action]) do keys[#keys + 1] = key end
     end
   end
@@ -90,14 +92,32 @@ function M.gate(map, operation, actions)
   return table.concat(bindings, "+")
 end
 
+function M.header(settings, kind, chosen, status)
+  local themes = require("pickr.themes")
+  local labels = { all = "All spaces", space = "This space", tab = "This tab" }
+  local effective, parts = pickers.effective(kind, chosen), {}
+  for _, scope in ipairs(pickers.scopes) do
+    local text, keys = labels[scope], settings.keymap.keys["scope_" .. scope]
+    if settings.popup.show_hints and #keys > 0 then text = text .. " (" .. M.display(keys) .. ")" end
+    local style = themes.ansi(settings.roles.header)
+    if not pickers.types[kind][scope] then style = themes.ansi(settings.roles.annotation) .. "\27[2m"
+    elseif effective == scope then style = themes.ansi(settings.roles.prompt) .. "\27[1m" end
+    parts[#parts + 1] = style .. text .. "\27[0m"
+  end
+  local lines = { table.concat(parts, " · ") }
+  if chosen ~= effective then
+    lines[#lines + 1] = themes.ansi(settings.roles.annotation) .. labels[chosen] .. " remembered\27[0m"
+  end
+  if status then lines[#lines + 1] = status end
+  return table.concat(lines, "\n")
+end
+
 function M.footer(map, count)
   local labels = { accept = "switch", close = "close", toggle_preview = "preview", refresh = "refresh",
-    tabs_current = "tabs here", tabs_all = "all tabs", spaces = "spaces",
-    agents_current = "agents here", agents_all = "all agents",
-    panes_tab = "panes in tab", panes_current = "panes in space", panes_all = "all panes" }
+    spaces = "spaces", tabs = "tabs", panes = "panes", agents = "agents" }
   local groups = {
     { "accept", "close", "toggle_preview", "refresh" },
-    { "tabs_current", "tabs_all", "spaces", "agents_current", "agents_all", "panes_tab", "panes_current", "panes_all" },
+    pickers.order,
   }
   local lines = {}
   for index, actions in ipairs(groups) do

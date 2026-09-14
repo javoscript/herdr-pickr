@@ -8,12 +8,12 @@ Keep bottom shortcut hints predictable and compact by separating picker actions 
 
 ### Requirement: Footer hints use action and variant rows
 
-When `popup.show_hints` is `true`, every picker SHALL place enabled switch, close, preview, and refresh hints on its first footer row, in that order. It SHALL place enabled tabs here, all tabs, spaces, agents here, all agents, panes in tab, panes in space, and all panes hints on its second footer row, in that order, including the current variant's shortcut. With default bindings and hints shown, the footer SHALL contain exactly these two rows. Hints SHALL retain lowercase labels and use ` · ` between hints on the same row. Footer generation SHALL NOT insert additional rows based on text length. Text wider than the available footer area SHALL use normal fzf clipping rather than additional hint rows. When `popup.show_hints` is `false`, the entire footer section SHALL be absent, with no blank rows or footer-only separator reserved for it.
+When `popup.show_hints` is true, Pickr SHALL place enabled switch, close, preview, and refresh hints on its first footer row, and enabled Spaces, Tabs, Panes, and Agents shortcuts on the second, including the active type. Default rows SHALL be `enter: switch · esc: close · ctrl+p: preview · ctrl+l: refresh` and `ctrl+s: spaces · ctrl+t: tabs · ctrl+r: panes · ctrl+a: agents`. Labels SHALL remain lowercase with ` · ` separators. Scope hints SHALL appear near the prompt instead of adding footer rows. Long footer rows SHALL clip without wrapping or generating extra rows. Hidden hints SHALL remove the footer, blank footer rows, and footer-only separator.
 
 #### Scenario: Default hints in every variant
-- **WHEN** any of the eight picker variants opens with default bindings, hints shown, and a nonempty candidate list
-- **THEN** its first footer row is `enter: switch · esc/ctrl+c: close · ctrl+p: preview · ctrl+l: refresh`
-- **AND** its second footer row is `ctrl+r: tabs here · ctrl+t: all tabs · ctrl+s: spaces · ctrl+a: agents here · ctrl+g: all agents · alt+1: panes in tab · alt+2: panes in space · alt+3: all panes`
+- **WHEN** any type opens at any scope with default bindings, hints shown, and a nonempty candidate list
+- **THEN** its first footer row is `enter: switch · esc: close · ctrl+p: preview · ctrl+l: refresh`
+- **AND** its second footer row is `ctrl+s: spaces · ctrl+t: tabs · ctrl+r: panes · ctrl+a: agents`
 - **AND** no third footer row is generated
 
 #### Scenario: Narrow popup or long aliases
@@ -28,7 +28,7 @@ When `popup.show_hints` is `true`, every picker SHALL place enabled switch, clos
 
 ### Requirement: Grouped hints preserve configuration and empty-list behavior
 
-When hints are shown, grouped hints SHALL use the effective configured keys, retaining every alias in the generated text with the existing slash-separated display format. Disabled actions SHALL have no hint and SHALL NOT leave dangling separators. If all variant shortcuts are disabled, the footer SHALL omit the second row rather than render an empty row. For zero candidates with hints shown, `no entries` SHALL prefix the first row followed by ` · `, without adding a row. A nonempty list filtered to zero matches SHALL retain its normal footer. The same grouping SHALL apply on initial launch, variant switches, and successful refresh publication; loading and failure SHALL retain the grouped footer while status and retry messages remain in their existing status area. When hints are hidden, the footer SHALL remain absent in all these states, including its `no entries` prefix; status and retry messages SHALL remain visible in their existing status area.
+Visible footer hints SHALL retain all effective aliases in slash-separated format and omit disabled actions without dangling separators. If all four picker shortcuts are disabled, the second row SHALL be omitted. Zero candidates SHALL prefix the first row with `no entries · `; a nonempty list with zero matches SHALL not. Initial launch, type/scope changes, and refresh publication SHALL use the same grouping. Loading/failure SHALL retain the footer and place messages near the scope/status area. Hidden hints SHALL remove the footer and its empty-list prefix in all states without hiding refresh/error messages or scope state.
 
 #### Scenario: Remapped and disabled controls
 - **WHEN** hints are shown, acceptance has multiple aliases, and preview or a variant shortcut is disabled
@@ -37,7 +37,7 @@ When hints are shown, grouped hints SHALL use the effective configured keys, ret
 - **AND** remaining hints keep their assigned row and relative order
 
 #### Scenario: All variant controls disabled
-- **WHEN** hints are shown and all eight variant shortcut arrays are empty
+- **WHEN** hints are shown and all four picker shortcut arrays are empty
 - **THEN** only the action row is generated, without a trailing newline
 
 #### Scenario: Empty candidate list
@@ -58,4 +58,26 @@ When hints are shown, grouped hints SHALL use the effective configured keys, ret
 #### Scenario: Hidden footer stays absent through empty results and lifecycle changes
 - **WHEN** a picker with hints hidden has zero candidates or zero search matches, switches variants, or refreshes through loading, failure, and successful retry
 - **THEN** no footer, `no entries` prefix, or reserved footer space appears
-- **AND** refresh status and retry messages continue to appear in their existing status area
+- **AND** scope state, refresh status and retry messages continue to appear in their existing status area
+
+### Requirement: Scope state remains visible near the query
+
+Pickr SHALL display one non-selectable scope row near/below the prompt and before candidate results, containing All spaces, This space, and This tab in that order in every type. The effective scope SHALL be visually distinguished; unsupported choices SHALL be muted with none active in Spaces. When a chosen scope is temporarily unsupported, visible text SHALL identify the remembered choice separately from the effective selection. Availability SHALL reflect the type's scope matrix rather than current result count or origin existence. With hints shown, every enabled scope action SHALL display its configured aliases, dimmed when unavailable. Hidden hints or disabled shortcuts SHALL suppress shortcut text, not scope labels/state. The row SHALL remain visible with empty results, during refresh/restoration/errors, and with hidden preview; it SHALL not become a searchable or selectable candidate. Long scope text SHALL clip rather than wrap.
+
+#### Scenario: Effective fallback and remembered intent
+- **WHEN** chosen scope is This tab and Tabs is active
+- **THEN** This space is highlighted, This tab is muted, and visible text identifies This tab as remembered
+- **AND** the remembered-choice text occupies its own non-selectable line immediately below the scope row, remaining visible with the preview shown
+
+#### Scenario: Spaces shows no active scope
+- **WHEN** Spaces opens
+- **THEN** all three scope choices are muted and none is active
+
+#### Scenario: Hidden hints preserve filter awareness
+- **WHEN** hints are hidden or scope shortcuts disabled
+- **THEN** scope labels, effective selection, and any remembered choice remain visible without the corresponding key hints
+
+#### Scenario: Refresh and narrow layout
+- **WHEN** refresh fails in a narrow popup with zero results
+- **THEN** the scope row remains non-selectable alongside the failure/retry state, uses clipping, and is not replaced by the status message
+- **AND** any remembered-choice line remains separate from the scope choices and the failure/retry message

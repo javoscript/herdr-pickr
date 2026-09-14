@@ -55,6 +55,7 @@ Pickr SHALL display one non-selectable scope row near/below the prompt and befor
 #### Scenario: Effective fallback and remembered intent
 - **WHEN** chosen scope is This tab and Tabs is active
 - **THEN** This space is highlighted, This tab is muted, and visible text identifies This tab as remembered
+- **AND** the remembered-choice text occupies its own non-selectable line immediately below the scope row, remaining visible with the preview shown
 
 #### Scenario: Spaces shows no active scope
 - **WHEN** Spaces opens
@@ -67,3 +68,4 @@ Pickr SHALL display one non-selectable scope row near/below the prompt and befor
 #### Scenario: Refresh and narrow layout
 - **WHEN** refresh fails in a narrow popup with zero results
 - **THEN** the scope row remains non-selectable alongside the failure/retry state, uses clipping, and is not replaced by the status message
+- **AND** any remembered-choice line remains separate from the scope choices and the failure/retry message

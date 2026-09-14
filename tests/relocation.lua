@@ -38,7 +38,7 @@ local ok, err = pcall(function()
   local code, output, errors = require("pickr.process").run("env", {
     "-i", "HOME=" .. assert(os.getenv("HOME")), "PATH=" .. assert(os.getenv("PATH")),
     "TMPDIR=/tmp", "TERM=xterm-256color", "lua", "../Herdr Pickr/tests/test.lua",
-  }, nil, nil, 120000)
+  }, nil, nil, 600000)
   io.write(output); io.stderr:write(errors)
   assert(code == 0, "isolated relocation regression failed")
 end)

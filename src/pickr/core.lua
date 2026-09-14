@@ -1,6 +1,7 @@
 local runtime = require("pickr.runtime")
 local themes = require("pickr.themes")
 local columns = require("pickr.columns")
+local pickers = require("pickr.pickers")
 local default_roles = themes.resolve()
 local M = {}
 
@@ -237,10 +238,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings, origin_
 		entry.parent_field = #entry
 		entry.muted_suffixes = { [#entry] = parent_suffixes[workspace_id] }
 	end
-	if scope == "current" and not current then
-		error("Current-space pickers must be launched from a Herdr popup", 0)
-	end
-	if kind == "workspaces" then
+	if kind == "spaces" then
 		for _, workspace in ipairs(workspaces) do
 			local entry = { workspace.workspace_id, status_text(workspace) }
 			add_space(entry, workspace.workspace_id)
@@ -273,8 +271,8 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings, origin_
 								seen[pane.pane_id] = true
 								local entry = { pane.pane_id, status_text(pane), indicator = indicator(pane, roles),
 									preview_pane = pane.pane_id }
-								if scope == "all" then add_space(entry, workspace_id) end
-								if scope ~= "tab" then entry[#entry + 1] = value(tab.label, tab.tab_id) end
+								add_space(entry, workspace_id)
+								entry[#entry + 1] = value(tab.label, tab.tab_id)
 								entry[#entry + 1] = value(pane.terminal_title_stripped,
 									value(pane.terminal_title, value(pane.title, "-")))
 								entry[#entry + 1] = pane.pane_id
@@ -298,7 +296,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings, origin_
 
 	local tabs = {}
 	for _, tab in ipairs(snapshot.tabs) do
-		if scope == "all" or tab.workspace_id == current then
+		if scope == "all" or (current and names[current] and tab.workspace_id == current) then
 			tabs[#tabs + 1] = tab
 		end
 	end
@@ -324,9 +322,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings, origin_
 			local entry = { tab.tab_id, status_text(tab) }
 			entry.indicator = indicator(tab, roles)
 			entry.preview_pane = targets[tab.tab_id]
-			if scope == "all" then
-				add_space(entry, tab.workspace_id)
-			end
+			add_space(entry, tab.workspace_id)
 			entry[#entry + 1] = value(tab.label, tab.tab_id)
 			entry[#entry + 1] = tab.pane_count .. " panes"
 			entry[#entry + 1] = directory_label(directories[tab.tab_id])
@@ -346,9 +342,29 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings, origin_
 	for _, tab in ipairs(tabs) do
 		tab_names[tab.tab_id] = value(tab.label, tab.tab_id)
 	end
+	local membership = {}
+	if scope == "tab" and current and origin_tab and names[current] then
+		local valid_tab = false
+		for _, tab in ipairs(snapshot.tabs) do
+			if tab.workspace_id == current and tab.tab_id == origin_tab then valid_tab = true end
+		end
+		local metadata = {}
+		for _, pane in ipairs(snapshot.panes) do metadata[pane.pane_id] = pane end
+		for _, layout in ipairs(snapshot.layouts) do
+			if valid_tab and layout.workspace_id == current and layout.tab_id == origin_tab then
+				for _, slot in ipairs(layout.panes or {}) do
+					local pane = metadata[slot.pane_id]
+					if pane and pane.workspace_id == current and pane.tab_id == origin_tab then
+						membership[pane.pane_id] = true
+					end
+				end
+			end
+		end
+	end
 	local agents = {}
 	for index, agent in ipairs(snapshot.agents) do
-		if scope == "all" or agent.workspace_id == current then
+		if scope == "all" or (current and names[current] and agent.workspace_id == current
+			and (scope ~= "tab" or (agent.tab_id == origin_tab and membership[agent.pane_id]))) then
 			agents[#agents + 1] = { agent = agent, index = index }
 		end
 	end
@@ -369,9 +385,7 @@ function M.snapshot_candidates(snapshot, kind, scope, current, settings, origin_
 		local entry = { agent.pane_id, status_text(agent) }
 		entry.indicator = indicator(agent, roles)
 		entry.preview_pane = agent.pane_id
-		if scope == "all" then
-			add_space(entry, agent.workspace_id)
-		end
+		add_space(entry, agent.workspace_id)
 		entry[#entry + 1] = tab_names[agent.tab_id] or agent.tab_id
 		entry[#entry + 1] = value(agent.name, value(agent.agent))
 		entry[#entry + 1] = value(agent.terminal_title_stripped, value(agent.terminal_title))
@@ -466,7 +480,9 @@ local function pick_once(kind, scope, settings, popup)
 	local session = M.new_session(rows, header)
 	session.settings = settings
 	session.popup = popup
-	local expect = keymap.expect(settings.keymap)
+	session.kind = kind
+	session.scope_header = function(status) return keymap.header(settings, kind, popup.chosen_scope, status) end
+	local expect = keymap.expect(settings.keymap, kind, popup.chosen_scope)
 	session.has_expect = #expect > 0
 	local footer
 	if settings.popup.show_hints then
@@ -476,21 +492,9 @@ local function pick_once(kind, scope, settings, popup)
 	for i = 1, #columns.layout(kind, scope, settings) do
 		search_fields[#search_fields + 1] = tostring(i)
 	end
-	local title = kind == "workspaces" and "Spaces"
-		or (kind:gsub("^%l", string.upper) .. " — " .. scope .. " space" .. (scope == "all" and "s" or ""))
-	if kind == "panes" then
-		title = ({ tab = "Panes in this tab", current = "Panes in this space", all = "Panes in all spaces" })[scope]
-	end
-	local prompt
-	local view
-	for variant, destination in pairs(keymap.variants) do
-		if destination[1] == kind and destination[2] == scope then
-			view = variant
-			prompt = settings.prompt.variants[variant]
-			break
-		end
-	end
-	local remembered = popup.views[view]
+	local title = kind:gsub("^%l", string.upper)
+	local prompt = settings.prompt.variants[kind]
+	local remembered = popup.views[kind]
 	session.entry_id = remembered and remembered.selected_id
 	local args = {
 		"--layout=reverse",
@@ -506,6 +510,7 @@ local function pick_once(kind, scope, settings, popup)
 		"--nth=" .. table.concat(search_fields, ","),
 		"--prompt=" .. prompt,
 		"--header-lines=1",
+		"--header=" .. session.scope_header(),
 		"--with-shell=/bin/sh -c",
 		"--preview=" .. runtime.preview_command(),
 		"--preview-window=right:50%:border-left:nowrap" .. (popup.preview_visible and "" or ":hidden"),
@@ -527,6 +532,11 @@ local function pick_once(kind, scope, settings, popup)
 	end
 	for _, key in ipairs(settings.keymap.keys.accept) do args[#args + 1] = "--bind=" .. key .. ":accept" end
 	for _, key in ipairs(settings.keymap.keys.close) do args[#args + 1] = "--bind=" .. key .. ":abort" end
+	for _, choice in ipairs(pickers.scopes) do
+		for _, key in ipairs(settings.keymap.keys["scope_" .. choice]) do
+			args[#args + 1] = "--bind=" .. key .. ":ignore"
+		end
+	end
 	if kind ~= "tabs" or scope == "all" then
 		args[#args + 1] = "--no-sort"
 	end
@@ -540,10 +550,15 @@ local function pick_once(kind, scope, settings, popup)
 			end, footer)
 	-- A shortcut can exit with code 1 when there are no matching rows.
 	local key, selected, target = result.key, result.row, result.target
-	local destination = keymap.variants[settings.keymap.reverse[key]]
-	if (code == 0 or code == 1) and (not signal or signal == 0) and destination then
-		popup.views[view] = { query = result.query, selected_id = result.selected_id }
-		return destination
+	local action = settings.keymap.reverse[key]
+	local next_scope = action and action:match("^scope_(.+)$")
+	local destination = action and pickers.types[action] and action
+	local scope_transition = next_scope and pickers.types[kind][next_scope]
+		and next_scope ~= pickers.effective(kind, popup.chosen_scope)
+	if (code == 0 or code == 1) and (not signal or signal == 0) and (destination or scope_transition) then
+		popup.views[kind] = { query = result.query, selected_id = result.selected_id }
+		if scope_transition then popup.chosen_scope = next_scope end
+		return destination or kind
 	end
 	if code == 1 or code == 130 or signal == 2 then
 		return
@@ -567,13 +582,14 @@ end
 
 function M.pick(kind, scope, settings)
 	settings = settings or require("pickr.config").owner()
-	local popup = { preview_visible = settings.preview.enabled_by_default, views = {}, origin = runtime.origin() }
+	local popup = { preview_visible = settings.preview.enabled_by_default, views = {}, origin = runtime.origin(),
+		chosen_scope = scope or "all" }
 	while true do
-		local next_picker = pick_once(kind, scope, settings, popup)
+		local next_picker = pick_once(kind, pickers.effective(kind, popup.chosen_scope), settings, popup)
 		if not next_picker then
 			return
 		end
-		kind, scope = table.unpack(next_picker)
+		kind = next_picker
 	end
 end
 
