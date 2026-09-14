@@ -115,7 +115,7 @@ The unpinned command installs the latest default-branch code. To install this
 release explicitly:
 
 ```sh
-herdr plugin install javoscript/herdr-pickr --ref v0.2.0
+herdr plugin install javoscript/herdr-pickr --ref v0.3.0
 ```
 
 Reinstalling preserves your plugin configuration and state. See
@@ -795,24 +795,6 @@ herdr plugin log list --plugin javoscript.herdr-pickr --limit 5
 ```
 
 ---
-
-## Development and regression checks
-
-Project code lives in `src/pickr/`; `src/main.lua` runs pickers and preview/control
-helpers, and `src/open.lua` launches popups. Lua regression fixtures live in
-`tests/`, with OpenSpec capabilities and change plans in `openspec/`.
-
-Run the complete suite from the checkout:
-
-```sh
-lua tests/test.lua
-```
-
-The suite includes changing-snapshot tests and real-fzf checks for live refresh,
-preview cancellation/coalescing, native scroll reset, and popup timer lifecycle.
-Allow several minutes. Its PTY harness currently uses macOS `script`/`stty`;
-Linux PTY regression execution is not yet supported. Focused live checks are
-`lua tests/live_snapshots.lua` and `lua tests/live_refresh.lua`.
 
 ## License and attribution
 

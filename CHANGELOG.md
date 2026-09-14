@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v0.3.0 (2026-09-14)
+
+- Add opt-in automatic candidate and selected-preview updates for all picker
+  types and scopes through `refresh.interval_ms`, disabled by default. Set it
+  to `1000` for one-second updates, then close and reopen Pickr to apply it.
+- Keep displayed results usable while fetching fresh candidates and after
+  recoverable failures, with automatic retry when periodic refresh is enabled.
+- Refresh selected visible previews asynchronously, allowing slow captures to
+  finish and cancelling obsolete work when selection, visibility, or views change.
+- **Breaking:** Refresh no longer clears results or disables acceptance throughout
+  fetching and failure. Final replacement uses native fzf identity tracking and
+  can ignore keystrokes; preview refresh returns scrolling to the top. Reopen
+  Pickr after updating, and repeat an input if it coincides with replacement.
+  Existing configuration requires no key renames.
+
 ## v0.2.0 (2026-09-14)
 
 - Add pane picking across all spaces, the original space, or the original tab,
